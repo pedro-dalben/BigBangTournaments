@@ -1,0 +1,21 @@
+plugins {
+    id 'net.neoforged.moddev' version '2.0.141'
+}
+
+base {
+    archivesName = "${mod_id}-common"
+}
+
+neoForge {
+    version = project.neo_version
+
+    parchment {
+        mappingsVersion = project.parchment_mappings_version
+        minecraftVersion = project.parchment_minecraft_version
+    }
+}
+
+dependencies {
+    compileOnly "com.cobblemon:neoforge:${cobblemon_version}"
+    compileOnly "org.jetbrains.kotlin:kotlin-stdlib:1.9.22"
+}
