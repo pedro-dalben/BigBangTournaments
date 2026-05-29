@@ -269,4 +269,16 @@ public class PokemonTeamService {
         }
         return BuiltInRegistries.ITEM.getKey(itemStack.getItem()).toString();
     }
+
+    /**
+     * Heals a player's party and returns true if successful.
+     */
+    public static boolean healPlayerTeam(ServerPlayer player) {
+        PartyStore party = Cobblemon.INSTANCE.getStorage().getParty(player);
+        if (party != null) {
+            party.heal();
+            return true;
+        }
+        return false;
+    }
 }

@@ -12,5 +12,8 @@
   "commands.tournament.restore.no_snapshot": "No tournament snapshot found for player %s.",
   "commands.tournament.restore.error": "An error occurred while restoring the team.",
   "commands.tournament.validate.valid": "Player %s's team is VALID (all Pokémon are level %s).",
-  "commands.tournament.validate.invalid": "Player %s's team is INVALID. Reasons:"
+  "commands.tournament.validate.invalid": "Player %s's team is INVALID. Reasons:",
+  "commands.tournament.prepareall.summary": "PrepareAll: %s prepared successfully, %s skipped (already has snapshot), %s skipped (empty party), %s errors.",
+  "commands.tournament.restoreall.summary": "RestoreAll: %s restored successfully, %s partial, %s skipped (no snapshot), %s errors.",
+  "commands.tournament.healall.success": "HealAll: Successfully healed %s player(s) teams."
 }

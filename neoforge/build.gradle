@@ -53,6 +53,7 @@ neoForge {
 dependencies {
     implementation project(':common')
     implementation "com.cobblemon:neoforge:${cobblemon_version}"
+    compileOnly "org.jetbrains.kotlin:kotlin-stdlib:1.9.22"
 }
 
 var generateModMetadata = tasks.register("generateModMetadata", ProcessResources) {
