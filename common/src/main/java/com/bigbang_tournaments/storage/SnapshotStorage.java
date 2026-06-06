@@ -16,6 +16,8 @@ import java.nio.file.AtomicMoveNotSupportedException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.UUID;
 
 public class SnapshotStorage {
@@ -39,7 +41,11 @@ public class SnapshotStorage {
         }
 
         try (Reader reader = Files.newBufferedReader(path, StandardCharsets.UTF_8)) {
-            return GSON.fromJson(reader, TournamentSnapshot.class);
+            TournamentSnapshot snapshot = GSON.fromJson(reader, TournamentSnapshot.class);
+            if (snapshot != null && snapshot.getSchemaVersion() <= 0) {
+                snapshot.setSchemaVersion(1);
+            }
+            return snapshot;
         } catch (Exception e) {
             LOGGER.error("Failed to load snapshot for player UUID " + playerUuid, e);
             return null;
@@ -89,5 +95,36 @@ public class SnapshotStorage {
 
     public static boolean hasSnapshot(MinecraftServer server, UUID playerUuid) {
         return Files.exists(getSnapshotPath(server, playerUuid));
+    }
+
+    public static List<TournamentSnapshot> listSnapshots(MinecraftServer server) {
+        List<TournamentSnapshot> snapshots = new ArrayList<>();
+        Path dir = getStorageDirectory(server);
+        if (!Files.exists(dir)) {
+            return snapshots;
+        }
+
+        try (var stream = Files.list(dir)) {
+            stream
+                    .filter(path -> path.getFileName().toString().endsWith(".json"))
+                    .filter(path -> !path.getFileName().toString().equals("tournament_state.json"))
+                    .filter(path -> !path.getFileName().toString().equals("tournament_config.json"))
+                    .forEach(path -> {
+                        String fileName = path.getFileName().toString();
+                        String uuidString = fileName.substring(0, fileName.length() - ".json".length());
+                        try {
+                            UUID uuid = UUID.fromString(uuidString);
+                            TournamentSnapshot snapshot = loadSnapshot(server, uuid);
+                            if (snapshot != null) {
+                                snapshots.add(snapshot);
+                            }
+                        } catch (IllegalArgumentException ignored) {
+                        }
+                    });
+        } catch (IOException e) {
+            LOGGER.error("Failed to list snapshots", e);
+        }
+
+        return snapshots;
     }
 }

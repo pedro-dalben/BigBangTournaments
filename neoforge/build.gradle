@@ -53,6 +53,9 @@ neoForge {
 dependencies {
     implementation project(':common')
     implementation "com.cobblemon:neoforge:${cobblemon_version}"
+    implementation "maven.modrinth:cobblemon-mega-showdown:${mega_showdown_version}"
+    implementation "io.wispforest:accessories-neoforge:${accessories_version}"
+    implementation "dev.architectury:architectury-neoforge:${architectury_version}"
     compileOnly "org.jetbrains.kotlin:kotlin-stdlib:1.9.22"
 }
 

@@ -1,10 +1,15 @@
 package com.bigbang_tournaments.service;
 
+import com.bigbang_tournaments.model.PokemonMoveSnapshot;
 import com.bigbang_tournaments.model.PokemonSnapshot;
+import com.bigbang_tournaments.model.TournamentRuleViolation;
 import com.bigbang_tournaments.model.TournamentSnapshot;
 import com.bigbang_tournaments.storage.SnapshotStorage;
 import com.cobblemon.mod.common.Cobblemon;
+import com.cobblemon.mod.common.api.moves.BenchedMove;
+import com.cobblemon.mod.common.api.moves.Move;
 import com.cobblemon.mod.common.api.pokemon.PokemonProperties;
+import com.cobblemon.mod.common.api.pokemon.stats.Stats;
 import com.cobblemon.mod.common.api.storage.party.PartyStore;
 import com.cobblemon.mod.common.pokemon.Pokemon;
 import net.minecraft.core.registries.BuiltInRegistries;
@@ -15,10 +20,24 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
+import java.util.List;
+import java.util.Locale;
+import java.util.Map;
+import java.util.Objects;
+import java.util.Set;
+import java.util.UUID;
 
-public class PokemonTeamService {
+public final class PokemonTeamService {
     private static final Logger LOGGER = LoggerFactory.getLogger(PokemonTeamService.class);
+
+    private PokemonTeamService() {
+    }
 
     public static class PrepareResult {
         public enum Status {
@@ -94,93 +113,70 @@ public class PokemonTeamService {
         }
     }
 
-    /**
-     * Prepares a player's team for a tournament: captures snapshot, sets level, and heals them.
-     */
-    public static PrepareResult prepareTeam(ServerPlayer player, int targetLevel, boolean force) {
-        MinecraftServer server = player.getServer();
-        if (server == null) {
-            return new PrepareResult(PrepareResult.Status.ERROR, null);
-        }
-
-        UUID playerUuid = player.getUUID();
-        if (!force && SnapshotStorage.hasSnapshot(server, playerUuid)) {
-            return new PrepareResult(PrepareResult.Status.ALREADY_HAS_SNAPSHOT, null);
-        }
-
-        PartyStore party = Cobblemon.INSTANCE.getStorage().getParty(player);
+    public static TournamentSnapshot captureCurrentPartySnapshot(ServerPlayer player, int preparedLevel, boolean rosterLocked) {
         List<PokemonSnapshot> pokemonSnapshots = new ArrayList<>();
-        List<Pokemon> partyPokemon = new ArrayList<>();
+        PartyStore party = Cobblemon.INSTANCE.getStorage().getParty(player);
 
         for (int slotIndex = 0; slotIndex < party.size(); slotIndex++) {
             Pokemon pokemon = party.get(slotIndex);
             if (pokemon == null) {
                 continue;
             }
-
-            partyPokemon.add(pokemon);
-
-            String species = pokemon.getSpecies() != null ? pokemon.getSpecies().getName() : "Unknown";
-            String form = pokemon.getForm() != null ? pokemon.getForm().getName() : "";
-            String heldItem = getHeldItemId(pokemon.heldItem());
-
-            PokemonSnapshot snapshot = new PokemonSnapshot(
-                    pokemon.getUuid(),
-                    slotIndex,
-                    pokemon.getLevel(),
-                    species,
-                    form,
-                    pokemon.getShiny(),
-                    heldItem,
-                    pokemon.getCurrentHealth(),
-                    ""
-            );
-            pokemonSnapshots.add(snapshot);
-        }
-
-        if (pokemonSnapshots.isEmpty()) {
-            return new PrepareResult(PrepareResult.Status.EMPTY_PARTY, null);
+            pokemonSnapshots.add(capturePokemonSnapshot(pokemon, slotIndex));
         }
 
         long now = System.currentTimeMillis();
-        TournamentSnapshot tournamentSnapshot = new TournamentSnapshot(
-                playerUuid,
+        return new TournamentSnapshot(
+                2,
+                player.getUUID(),
                 player.getGameProfile().getName(),
                 now,
                 now,
-                targetLevel,
+                preparedLevel,
                 "ACTIVE",
+                rosterLocked,
                 pokemonSnapshots
         );
+    }
 
+    public static PrepareResult prepareTeam(ServerPlayer player, int targetLevel, boolean force) {
+        MinecraftServer server = player.getServer();
+        if (server == null) {
+            return new PrepareResult(PrepareResult.Status.ERROR, null);
+        }
+
+        if (!force && SnapshotStorage.hasSnapshot(server, player.getUUID())) {
+            return new PrepareResult(PrepareResult.Status.ALREADY_HAS_SNAPSHOT, null);
+        }
+
+        PartyStore party = Cobblemon.INSTANCE.getStorage().getParty(player);
+        List<Pokemon> partyPokemon = listPartyPokemon(player);
+        if (partyPokemon.isEmpty()) {
+            return new PrepareResult(PrepareResult.Status.EMPTY_PARTY, null);
+        }
+
+        TournamentSnapshot snapshot = captureCurrentPartySnapshot(player, targetLevel, true);
         try {
-            // Save snapshot to disk
-            SnapshotStorage.saveSnapshot(server, tournamentSnapshot);
+            SnapshotStorage.saveSnapshot(server, snapshot);
         } catch (IOException e) {
-            LOGGER.error("Failed to save tournament snapshot for " + player.getGameProfile().getName(), e);
+            LOGGER.error("Failed to save tournament snapshot for {}", player.getGameProfile().getName(), e);
             return new PrepareResult(PrepareResult.Status.ERROR, null);
         }
 
         applyLevelToParty(partyPokemon, targetLevel);
-
-        // Heal the entire party
         party.heal();
 
         LOGGER.info("Prepared team for player {} to level {}", player.getGameProfile().getName(), targetLevel);
-        return new PrepareResult(PrepareResult.Status.SUCCESS, tournamentSnapshot);
+        return new PrepareResult(PrepareResult.Status.SUCCESS, snapshot);
     }
 
-    /**
-     * Restores a player's team to their original levels based on the saved snapshot.
-     */
     public static RestoreResult restoreTeam(ServerPlayer player) {
         MinecraftServer server = player.getServer();
         if (server == null) {
             return new RestoreResult(RestoreResult.Status.ERROR, Collections.emptyList(), Collections.emptyList());
         }
 
-        UUID playerUuid = player.getUUID();
-        TournamentSnapshot snapshot = SnapshotStorage.loadSnapshot(server, playerUuid);
+        TournamentSnapshot snapshot = SnapshotStorage.loadSnapshot(server, player.getUUID());
         if (snapshot == null) {
             return new RestoreResult(RestoreResult.Status.NO_SNAPSHOT, Collections.emptyList(), Collections.emptyList());
         }
@@ -208,50 +204,222 @@ public class PokemonTeamService {
             }
         }
 
-        // Heal the party
         party.heal();
-
-        // Delete snapshot
-        SnapshotStorage.deleteSnapshot(server, playerUuid);
+        SnapshotStorage.deleteSnapshot(server, player.getUUID());
 
         RestoreResult.Status status = missingNames.isEmpty() ? RestoreResult.Status.SUCCESS : RestoreResult.Status.PARTIAL;
-        LOGGER.info("Restored team for player {}. Status: {}, Restored: {}, Missing: {}",
+        LOGGER.info("Restored team for player {}. Status: {}, restored: {}, missing: {}",
                 player.getGameProfile().getName(), status, restoredNames.size(), missingNames.size());
-
         return new RestoreResult(status, restoredNames, missingNames);
     }
 
-    /**
-     * Validates if a player's team complies with tournament rules (e.g. all Pokemon are at the expected level).
-     */
     public static ValidateResult validateTeam(ServerPlayer player, int expectedLevel) {
-        PartyStore party = Cobblemon.INSTANCE.getStorage().getParty(player);
-        List<String> invalidReasons = new ArrayList<>();
+        List<TournamentRuleViolation> violations = TournamentRulesValidator.validatePlayer(player, expectedLevel, false);
+        return new ValidateResult(violations.isEmpty(), TournamentRulesValidator.toReasonList(violations));
+    }
 
-        boolean hasAnyPokemon = false;
-        for (int slotIndex = 0; slotIndex < party.size(); slotIndex++) {
-            Pokemon pokemon = party.get(slotIndex);
-            if (pokemon == null) {
-                invalidReasons.add(String.format("Slot %d is empty.", slotIndex + 1));
+    public static List<String> comparePartyAgainstSnapshot(ServerPlayer player, TournamentSnapshot snapshot) {
+        Map<UUID, PokemonSnapshot> expectedByUuid = new LinkedHashMap<>();
+        for (PokemonSnapshot pokemonSnapshot : snapshot.getParty()) {
+            expectedByUuid.put(pokemonSnapshot.getPokemonUuid(), pokemonSnapshot);
+        }
+
+        Map<UUID, Pokemon> currentByUuid = new LinkedHashMap<>();
+        for (Pokemon pokemon : listPartyPokemon(player)) {
+            currentByUuid.put(pokemon.getUuid(), pokemon);
+        }
+
+        List<String> changes = new ArrayList<>();
+        for (PokemonSnapshot expected : snapshot.getParty()) {
+            Pokemon current = currentByUuid.remove(expected.getPokemonUuid());
+            if (current == null) {
+                changes.add("Pokemon removido do roster travado: " + expected.getSpecies() + ".");
                 continue;
             }
 
-            hasAnyPokemon = true;
-            if (pokemon.getLevel() != expectedLevel) {
-                String speciesName = pokemon.getSpecies() != null ? pokemon.getSpecies().getName() : "Unknown";
-                invalidReasons.add(String.format("Slot %d: %s is level %d (expected %d)",
-                        slotIndex + 1, speciesName, pokemon.getLevel(), expectedLevel));
+            compareField(changes, expected.getSpecies(), current.getSpecies() != null ? current.getSpecies().getName() : "Unknown",
+                    "Species alterada para " + current.getSpecies().getName() + ".");
+            compareField(changes, expected.getForm(), current.getForm() != null ? current.getForm().getName() : "",
+                    "Forma alterada para " + (current.getForm() != null ? current.getForm().getName() : "") + ".");
+            compareField(changes, expected.getHeldItem(), getHeldItemId(current.heldItem()),
+                    "Item alterado em " + expected.getSpecies() + ": " + getHeldItemId(current.heldItem()) + ".");
+            compareField(changes, expected.getAbility(), current.getAbility() != null ? current.getAbility().getName() : "",
+                    "Habilidade alterada em " + expected.getSpecies() + ": " + (current.getAbility() != null ? current.getAbility().getName() : "") + ".");
+            compareField(changes, expected.getNature(), current.getNature() != null ? current.getNature().getName().toString() : "",
+                    "Nature alterada em " + expected.getSpecies() + ".");
+            compareField(changes, expected.getMintedNature(), current.getMintedNature() != null ? current.getMintedNature().getName().toString() : "",
+                    "Minted nature alterada em " + expected.getSpecies() + ".");
+            compareField(changes, expected.getTeraType(), current.getTeraType() != null ? current.getTeraType().getName() : "",
+                    "Tera type alterado em " + expected.getSpecies() + ".");
+
+            if (expected.isGmaxFactor() != current.getGmaxFactor()) {
+                changes.add("Gmax factor alterado em " + expected.getSpecies() + ".");
+            }
+            if (expected.getDynamaxLevel() != current.getDmaxLevel()) {
+                changes.add("Dynamax level alterado em " + expected.getSpecies() + ".");
+            }
+            if (expected.isShiny() != current.getShiny()) {
+                changes.add("Shiny flag alterada em " + expected.getSpecies() + ".");
+            }
+
+            Set<String> expectedAspects = new LinkedHashSet<>(expected.getAspects());
+            Set<String> currentAspects = new LinkedHashSet<>(current.getAspects());
+            if (!expectedAspects.equals(currentAspects)) {
+                changes.add("Aspects alterados em " + expected.getSpecies() + ": " + currentAspects + ".");
+            }
+
+            if (!Objects.equals(expected.getMoveSet(), captureMoveSnapshots(current.getMoveSet()))) {
+                changes.add("Moveset alterado em " + expected.getSpecies() + ".");
+            }
+            if (!Objects.equals(expected.getBenchedMoves(), captureBenchedMoveSnapshots(current))) {
+                changes.add("Benched moves alterados em " + expected.getSpecies() + ".");
+            }
+            if (!Objects.equals(expected.getEvs(), captureEvs(current))) {
+                changes.add("EVs alterados em " + expected.getSpecies() + ".");
+            }
+            if (!Objects.equals(expected.getIvs(), captureIvs(current))) {
+                changes.add("IVs alterados em " + expected.getSpecies() + ".");
+            }
+            if (!Objects.equals(expected.getHyperTrainedIvs(), captureHyperTrainedIvs(current))) {
+                changes.add("Hyper trained IVs alterados em " + expected.getSpecies() + ".");
             }
         }
 
-        if (!hasAnyPokemon) {
-            invalidReasons.add("The party is empty.");
+        for (Pokemon unexpected : currentByUuid.values()) {
+            String speciesName = unexpected.getSpecies() != null ? unexpected.getSpecies().getName() : "Unknown";
+            changes.add("Pokemon adicionado ao roster travado: " + speciesName + ".");
         }
 
-        return new ValidateResult(invalidReasons.isEmpty(), invalidReasons);
+        return changes;
     }
 
-    private static void applyLevelToParty(List<Pokemon> partyPokemon, int targetLevel) {
+    public static boolean healPlayerTeam(ServerPlayer player) {
+        PartyStore party = Cobblemon.INSTANCE.getStorage().getParty(player);
+        if (party != null) {
+            party.heal();
+            return true;
+        }
+        return false;
+    }
+
+    public static String getHeldItemId(ItemStack itemStack) {
+        if (itemStack == null || itemStack.isEmpty()) {
+            return "";
+        }
+        return BuiltInRegistries.ITEM.getKey(itemStack.getItem()).toString();
+    }
+
+    public static List<Pokemon> listPartyPokemon(ServerPlayer player) {
+        List<Pokemon> partyPokemon = new ArrayList<>();
+        PartyStore party = Cobblemon.INSTANCE.getStorage().getParty(player);
+        for (int slotIndex = 0; slotIndex < party.size(); slotIndex++) {
+            Pokemon pokemon = party.get(slotIndex);
+            if (pokemon != null) {
+                partyPokemon.add(pokemon);
+            }
+        }
+        return partyPokemon;
+    }
+
+    private static PokemonSnapshot capturePokemonSnapshot(Pokemon pokemon, int slotIndex) {
+        return new PokemonSnapshot(
+                pokemon.getUuid(),
+                slotIndex,
+                pokemon.showdownId(),
+                pokemon.getSpecies() != null ? pokemon.getSpecies().getName() : "Unknown",
+                pokemon.getSpecies() != null && pokemon.getSpecies().getResourceIdentifier() != null
+                        ? pokemon.getSpecies().getResourceIdentifier().toString()
+                        : "",
+                pokemon.getForm() != null ? pokemon.getForm().getName() : "",
+                new ArrayList<>(pokemon.getAspects()),
+                pokemon.getLevel(),
+                pokemon.getExperience(),
+                getHeldItemId(pokemon.heldItem()),
+                pokemon.getAbility() != null ? pokemon.getAbility().getName() : "",
+                pokemon.getNature() != null ? pokemon.getNature().getName().toString() : "",
+                pokemon.getMintedNature() != null ? pokemon.getMintedNature().getName().toString() : "",
+                captureMoveSnapshots(pokemon.getMoveSet()),
+                captureBenchedMoveSnapshots(pokemon),
+                captureEvs(pokemon),
+                captureIvs(pokemon),
+                captureHyperTrainedIvs(pokemon),
+                pokemon.getShiny(),
+                pokemon.getFriendship(),
+                pokemon.getTeraType() != null ? pokemon.getTeraType().getName() : "",
+                pokemon.getGmaxFactor(),
+                pokemon.getDmaxLevel(),
+                pokemon.getCurrentHealth(),
+                pokemon.getStatus() != null && pokemon.getStatus().getStatus() != null
+                        ? pokemon.getStatus().getStatus().toString()
+                        : "",
+                ""
+        );
+    }
+
+    private static List<PokemonMoveSnapshot> captureMoveSnapshots(Iterable<Move> moveSet) {
+        List<PokemonMoveSnapshot> moves = new ArrayList<>();
+        for (Move move : moveSet) {
+            if (move == null) {
+                continue;
+            }
+            moves.add(new PokemonMoveSnapshot(
+                    move.getName(),
+                    move.getCurrentPp(),
+                    move.getMaxPp(),
+                    move.getRaisedPpStages()
+            ));
+        }
+        return moves;
+    }
+
+    private static List<PokemonMoveSnapshot> captureBenchedMoveSnapshots(Pokemon pokemon) {
+        List<PokemonMoveSnapshot> moves = new ArrayList<>();
+        for (BenchedMove benchedMove : pokemon.getBenchedMoves()) {
+            if (benchedMove == null || benchedMove.getMoveTemplate() == null) {
+                continue;
+            }
+            int maxPp = benchedMove.getMoveTemplate().getMaxPp();
+            moves.add(new PokemonMoveSnapshot(
+                    benchedMove.getMoveTemplate().getName(),
+                    maxPp,
+                    maxPp,
+                    benchedMove.getPpRaisedStages()
+            ));
+        }
+        return moves;
+    }
+
+    private static Map<String, Integer> captureEvs(Pokemon pokemon) {
+        Map<String, Integer> stats = new LinkedHashMap<>();
+        for (Stats stat : Stats.values()) {
+            if (stat.getType() == com.cobblemon.mod.common.api.pokemon.stats.Stat.Type.PERMANENT) {
+                stats.put(stat.getShowdownId().toLowerCase(Locale.ROOT), pokemon.getEvs().get(stat));
+            }
+        }
+        return stats;
+    }
+
+    private static Map<String, Integer> captureIvs(Pokemon pokemon) {
+        Map<String, Integer> stats = new LinkedHashMap<>();
+        for (Stats stat : Stats.values()) {
+            if (stat.getType() == com.cobblemon.mod.common.api.pokemon.stats.Stat.Type.PERMANENT) {
+                stats.put(stat.getShowdownId().toLowerCase(Locale.ROOT), pokemon.getIvs().get(stat));
+            }
+        }
+        return stats;
+    }
+
+    private static Map<String, Integer> captureHyperTrainedIvs(Pokemon pokemon) {
+        Map<String, Integer> stats = new LinkedHashMap<>();
+        for (Stats stat : Stats.values()) {
+            if (stat.getType() == com.cobblemon.mod.common.api.pokemon.stats.Stat.Type.PERMANENT && pokemon.getIvs().isHyperTrained(stat)) {
+                stats.put(stat.getShowdownId().toLowerCase(Locale.ROOT), pokemon.getIvs().getEffectiveBattleIV(stat));
+            }
+        }
+        return stats;
+    }
+
+    private static void applyLevelToParty(Collection<Pokemon> partyPokemon, int targetLevel) {
         for (Pokemon pokemon : partyPokemon) {
             applyLevel(pokemon, targetLevel);
         }
@@ -263,22 +431,13 @@ public class PokemonTeamService {
         properties.apply(pokemon);
     }
 
-    private static String getHeldItemId(ItemStack itemStack) {
-        if (itemStack == null || itemStack.isEmpty()) {
-            return "";
+    private static void compareField(List<String> changes, String expected, String current, String message) {
+        if (!Objects.equals(normalize(expected), normalize(current))) {
+            changes.add(message);
         }
-        return BuiltInRegistries.ITEM.getKey(itemStack.getItem()).toString();
     }
 
-    /**
-     * Heals a player's party and returns true if successful.
-     */
-    public static boolean healPlayerTeam(ServerPlayer player) {
-        PartyStore party = Cobblemon.INSTANCE.getStorage().getParty(player);
-        if (party != null) {
-            party.heal();
-            return true;
-        }
-        return false;
+    private static String normalize(String value) {
+        return value == null ? "" : value.trim().toLowerCase(Locale.ROOT);
     }
 }
