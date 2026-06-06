@@ -1,8 +1,8 @@
 {
   "commands.tournament.prepare.success": "Successfully prepared %s's team to level %s and healed them.",
   "commands.tournament.prepare.success_target": "Your team has been prepared for the tournament at level %s.",
-  "commands.tournament.prepare.invalid_level": "Invalid level. Only level 50 or 100 are allowed.",
-  "commands.tournament.prepare.already_has_snapshot": "Player %s already has an active tournament snapshot. Use 'force = true' to overwrite.",
+  "commands.tournament.prepare.invalid_level": "Invalid level. Only configured tournament levels are allowed.",
+  "commands.tournament.prepare.already_has_snapshot": "Player %s already has an active tournament snapshot. Use force = true to overwrite.",
   "commands.tournament.prepare.empty_party": "Player %s has an empty party.",
   "commands.tournament.prepare.error": "An error occurred while preparing the team.",
   "commands.tournament.restore.success": "Successfully restored %s's team and healed them.",
@@ -11,9 +11,9 @@
   "commands.tournament.restore.partial_target": "Your team levels have been partially restored. Check server logs/operator messages for details.",
   "commands.tournament.restore.no_snapshot": "No tournament snapshot found for player %s.",
   "commands.tournament.restore.error": "An error occurred while restoring the team.",
-  "commands.tournament.validate.valid": "Player %s's team is VALID (all Pokémon are level %s).",
-  "commands.tournament.validate.invalid": "Player %s's team is INVALID. Reasons:",
-  "commands.tournament.prepareall.summary": "PrepareAll: %s prepared successfully, %s skipped (already has snapshot), %s skipped (empty party), %s errors.",
-  "commands.tournament.restoreall.summary": "RestoreAll: %s restored successfully, %s partial, %s skipped (no snapshot), %s errors.",
-  "commands.tournament.healall.success": "HealAll: Successfully healed %s player(s) teams."
+  "commands.tournament.validate.valid": "Player %s's team is valid for level %s.",
+  "commands.tournament.validate.invalid": "Player %s's team is invalid. Reasons:",
+  "commands.tournament.prepareall.summary": "PrepareAll: %s prepared successfully, %s skipped, %s pending, %s offline.",
+  "commands.tournament.restoreall.summary": "RestoreAll: %s restored successfully, %s partial, %s skipped, %s errors.",
+  "commands.tournament.healall.success": "HealAll: Successfully healed %s player team(s)."
 }

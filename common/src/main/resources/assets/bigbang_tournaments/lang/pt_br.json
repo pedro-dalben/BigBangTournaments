@@ -1,0 +1,19 @@
+{
+  "commands.tournament.prepare.success": "Time de %s preparado com sucesso para o level %s e curado.",
+  "commands.tournament.prepare.success_target": "Seu time foi preparado para o campeonato no level %s.",
+  "commands.tournament.prepare.invalid_level": "Level invalido. Apenas os levels configurados para o torneio sao permitidos.",
+  "commands.tournament.prepare.already_has_snapshot": "O jogador %s ja possui um snapshot ativo. Use force = true para sobrescrever.",
+  "commands.tournament.prepare.empty_party": "O jogador %s esta com a party vazia.",
+  "commands.tournament.prepare.error": "Ocorreu um erro ao preparar o time.",
+  "commands.tournament.restore.success": "Time de %s restaurado com sucesso e curado.",
+  "commands.tournament.restore.success_target": "Os levels originais do seu time foram restaurados.",
+  "commands.tournament.restore.partial": "Time de %s restaurado parcialmente. Restaurados: %s. Ausentes: %s",
+  "commands.tournament.restore.partial_target": "Os levels do seu time foram restaurados parcialmente. Verifique os logs do servidor para detalhes.",
+  "commands.tournament.restore.no_snapshot": "Nenhum snapshot de torneio foi encontrado para o jogador %s.",
+  "commands.tournament.restore.error": "Ocorreu um erro ao restaurar o time.",
+  "commands.tournament.validate.valid": "O time de %s esta valido para o level %s.",
+  "commands.tournament.validate.invalid": "O time de %s esta invalido. Motivos:",
+  "commands.tournament.prepareall.summary": "PrepareAll: %s preparado(s), %s ignorado(s), %s pendente(s), %s offline.",
+  "commands.tournament.restoreall.summary": "RestoreAll: %s restaurado(s), %s parcial(is), %s ignorado(s), %s erro(s).",
+  "commands.tournament.healall.success": "HealAll: %s time(s) curado(s) com sucesso."
+}
