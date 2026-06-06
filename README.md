@@ -1,90 +1,139 @@
 # BigBang Tournaments
 
-**BigBang Tournaments** is a server-side NeoForge mod for Minecraft 1.21.1 and Cobblemon 1.7.3. It is designed to help server operators run tournaments by managing tournament team preparation, level scaling, level validation, and original party state restoration.
+`bigbang_tournaments` is a server-side NeoForge mod for Minecraft `1.21.1` built for Cobblemon `1.7.3`.
 
-This is a **server-side only** mod. Players do not need to install it on their clients.
+It now supports competitive tournament operations without automatic bracket generation:
+- participant registration
+- competitive team validation
+- pending correction windows with automatic revalidation
+- complete roster snapshots for audit and lock enforcement
+- arena setup
+- manual PvP battle start through the Cobblemon API
+- spectator teleport plus Cobblemon spectate integration
+- automatic winner detection with manual fallback
+- restore/unlock flows at the end of the event
 
----
+Players do not need the mod on the client, but the server must also run:
+- Cobblemon `1.7.3+1.21.1`
+- Cobblemon: Mega Showdown `1.8.4+1.7.3+1.21.1`
+- Accessories `1.1.0-beta.52+1.21.1`
+- Architectury API `13.0.8`
 
-## Features
+## Core Behavior
 
-- **Tournament Team Preparation**: Scales player Pokémon parties to level 50 or 100 for tournament play and fully heals the party.
-- **Atomic State Snapshots**: Automatically saves the original state of the player's Pokémon (level, species, form, held item, original HP) into a JSON snapshot prior to scaling. Overwrites are blocked unless explicitly forced.
-- **Robust Restoration**: Restores the original levels of the player's Pokémon from their snapshot. It matches Pokémon using their unique UUIDs, ensuring correct levels are restored even if the player reorders their party slots.
-- **Level Validation**: Checks if all Pokémon in a player's party are at the expected tournament level (e.g., exactly level 50 or 100), reporting specific invalid slots and reasons.
-- **Safe Persistence**: Saves snapshots inside the active world's `serverconfig/bigbang_tournaments/` directory. Writes are atomic (writing to a `.json.tmp` file and moving it) to prevent corruption during sudden server crashes.
+### Validation before prepare
+`/tournament prepare <player> <level>` validates the active party before locking it.
 
----
+The validator checks:
+- empty slots / empty party
+- duplicated species
+- duplicated held items
+- banned legendary and mythical Pokemon
+- configured banned species and banned held items
+- incorrect level
+- more than one special mechanic in the same team
+- roster drift against the locked snapshot before battles
+
+If the team is invalid:
+- the player is not prepared
+- the roster is not locked
+- a pending validation record is stored
+- the server broadcasts a correction window message
+- the player receives the exact violation reasons
+- the mod revalidates again after the configured real-time window
+
+### Snapshot and lock
+Snapshots are still stored per player under:
+
+`<world>/serverconfig/bigbang_tournaments/<player-uuid>.json`
+
+They now capture the competitive roster in more detail:
+- Pokemon UUID and slot
+- species, form and aspects
+- original level and experience
+- held item
+- ability
+- nature and minted nature
+- move set and benched moves
+- EVs and IVs
+- shiny flag
+- friendship
+- tera type
+- gmax factor
+- dynamax level
+- HP and status for audit
+
+The snapshot is used for:
+- restore
+- pre-battle anti-fraud checks
+- staff audit logs
+
+It is not used to rebuild Pokemon from scratch.
+
+### Arena and battle flow
+The mod supports one main arena with:
+- `pos1`
+- `pos2`
+- `spectator`
+
+Battle flow:
+1. validate both players again
+2. heal both teams
+3. teleport them to the arena
+4. enforce a small arena radius
+5. announce and count down
+6. start PvP with `BattleBuilder.pvp1v1(...)`
+7. store active battle metadata and `battleId`
+8. detect the winner through Cobblemon events when possible
+9. allow `/tournament win <player>` as manual fallback
 
 ## Commands
 
-All commands require operator permissions (Level 2).
+### Admin
+- `/tournament participant add <player>`
+- `/tournament participant remove <player>`
+- `/tournament participant list`
+- `/tournament validate <player> <level>`
+- `/tournament validateall <level>`
+- `/tournament prepare <player> <level> [force]`
+- `/tournament prepareall <level> [force]`
+- `/tournament restore <player>`
+- `/tournament restoreall`
+- `/tournament unlock <player>`
+- `/tournament arena setpos1`
+- `/tournament arena setpos2`
+- `/tournament arena setspectator`
+- `/tournament arena info`
+- `/tournament battle <player1> <player2>`
+- `/tournament win <player>`
+- `/tournament healall`
 
-### 1. Prepare Team
-Scales a player's party to the target level, saves a snapshot of their original state, and heals the party.
-```bash
-/tournament prepare <player> <level> [force]
-```
-- `<player>`: The target player name.
-- `<level>`: Must be either `50` or `100`.
-- `[force]` (Optional, boolean): If `true`, overwrites any existing active snapshot for this player. Default is `false`.
+### Player
+- `/tournament spectate`
+- `/assistirbatalha`
 
-### 2. Restore Team
-Restores the original levels of a player's Pokémon using the saved snapshot and deletes the snapshot file.
-```bash
-/tournament restore <player>
-```
-- `<player>`: The target player name.
+## Tournament State Files
 
-### 3. Validate Team
-Verifies that all Pokémon in the player's party match the specified tournament level.
-```bash
-/tournament validate <player> <level>
-```
-- `<player>`: The target player name.
-- `<level>`: The expected level (usually `50` or `100`).
+Alongside per-player snapshots, the mod persists:
+- `serverconfig/bigbang_tournaments/tournament_config.json`
+- `serverconfig/bigbang_tournaments/tournament_state.json`
 
----
+Those files store:
+- arena positions
+- participant list
+- prepared / pending / locked state
+- active battle
+- battle history
+- tournament defaults such as allowed levels, correction window and clauses
 
-## Snapshot Storage Structure
+## Building
 
-Snapshots are stored as JSON files under the world save directory:
-`<world_save>/serverconfig/bigbang_tournaments/<player-uuid>.json`
-
-Example snapshot file structure:
-```json
-{
-  "playerUuid": "e7b0fa56-11f8-4cb9-90de-3453715cbe24",
-  "playerName": "Pedro",
-  "createdAt": 1716769854000,
-  "updatedAt": 1716769854000,
-  "preparedLevel": 50,
-  "status": "ACTIVE",
-  "party": [
-    {
-      "pokemonUuid": "a8c9b20e-8ef2-48f6-ad39-bb478201a03f",
-      "slot": 0,
-      "originalLevel": 78,
-      "species": "Charizard",
-      "form": "",
-      "shiny": false,
-      "heldItem": "minecraft:charcoal",
-      "originalHp": 240,
-      "notes": ""
-    }
-  ]
-}
-```
-
----
-
-## Building from Source
-
-To compile the mod and package the NeoForge JAR, run the following command from the root directory:
+From the repository root:
 
 ```bash
 ./gradlew build
 ```
 
-The output JAR file will be located at:
-`neoforge/build/libs/bigbang_tournaments-1.0.0.jar`
+The NeoForge jar is generated under:
+
+`neoforge/build/libs/`
