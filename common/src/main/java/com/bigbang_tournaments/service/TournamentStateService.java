@@ -10,6 +10,7 @@ import com.bigbang_tournaments.model.TournamentState;
 import com.bigbang_tournaments.storage.TournamentConfigStorage;
 import com.bigbang_tournaments.storage.TournamentStateStorage;
 import com.bigbang_tournaments.util.TournamentMessages;
+import com.bigbang_tournaments.util.PermissionHelper;
 import com.cobblemon.mod.common.api.scheduling.ScheduledTask;
 import com.cobblemon.mod.common.api.scheduling.ServerRealTimeTaskTracker;
 import com.mojang.authlib.GameProfile;
@@ -293,5 +294,128 @@ public final class TournamentStateService {
 
         LOGGER.warn("Automatic prepare failed for {}", player.getGameProfile().getName());
         schedulePendingValidation(server, playerUuid, level);
+    }
+
+    public static final List<String> ELEMENTS = List.of(
+        "💧 Água", "🔥 Fogo", "🌿 Planta", "⚡ Elétrico", "⚙️ Aço", "👻 Fantasma",
+        "🧚 Fada", "🐉 Dragão", "☠️ Venenoso", "🧠 Psíquico", "🥊 Lutador", "🌑 Sombrio", "🌎 Terra"
+    );
+
+    public static synchronized String registerPlayer(MinecraftServer server, ServerPlayer player) {
+        TournamentState state = getState(server);
+        if (state.getTournamentName() == null || state.getTournamentName().trim().isEmpty()) {
+            throw new IllegalStateException("Nao ha nenhum campeonato agendado no momento.");
+        }
+
+        UUID uuid = player.getUUID();
+        if (getParticipant(server, uuid).isPresent()) {
+            throw new IllegalArgumentException("Voce ja esta inscrito neste campeonato.");
+        }
+
+        TournamentParticipantRecord record = new TournamentParticipantRecord(uuid, player.getGameProfile().getName());
+        String assignedElement = null;
+
+        if ("singleelement".equalsIgnoreCase(state.getTournamentType())) {
+            assignedElement = chooseElementForNewParticipant(state);
+            record.setAssignedElement(assignedElement);
+            record.setRollsUsed(0);
+        }
+
+        state.getParticipants().add(record);
+        saveState(server);
+
+        return assignedElement;
+    }
+
+    private static String chooseElementForNewParticipant(TournamentState state) {
+        Map<String, Integer> counts = new HashMap<>();
+        for (String element : ELEMENTS) {
+            counts.put(element, 0);
+        }
+        for (TournamentParticipantRecord participant : state.getParticipants()) {
+            if (participant.getAssignedElement() != null && counts.containsKey(participant.getAssignedElement())) {
+                counts.put(participant.getAssignedElement(), counts.get(participant.getAssignedElement()) + 1);
+            }
+        }
+
+        int min = counts.values().stream().min(Integer::compare).orElse(0);
+        List<String> candidates = new ArrayList<>();
+        for (Map.Entry<String, Integer> entry : counts.entrySet()) {
+            if (entry.getValue() == min) {
+                candidates.add(entry.getKey());
+            }
+        }
+
+        int index = (int) (Math.random() * candidates.size());
+        return candidates.get(index);
+    }
+
+    public static synchronized String rerollElement(MinecraftServer server, ServerPlayer player) {
+        TournamentState state = getState(server);
+        if (state.getTournamentName() == null || state.getTournamentName().trim().isEmpty()) {
+            throw new IllegalStateException("Nao ha nenhum campeonato ativo no momento.");
+        }
+        if (!"singleelement".equalsIgnoreCase(state.getTournamentType())) {
+            throw new IllegalStateException("Este comando so esta disponivel para campeonatos do tipo singleelement.");
+        }
+
+        UUID uuid = player.getUUID();
+        TournamentParticipantRecord record = getParticipant(server, uuid)
+                .orElseThrow(() -> new IllegalArgumentException("Voce nao esta inscrito no campeonato."));
+
+        TournamentConfig config = getConfig(server);
+        int maxRolls = PermissionHelper.getMaxRolls(player, config.getDefaultRerolls());
+        if (record.getRollsUsed() >= maxRolls) {
+            throw new IllegalStateException("Voce ja atingiu o limite de sortear novamente (" + record.getRollsUsed() + "/" + maxRolls + ").");
+        }
+
+        String oldElement = record.getAssignedElement() != null ? record.getAssignedElement() : "";
+        
+        Map<String, Integer> counts = new HashMap<>();
+        for (String element : ELEMENTS) {
+            counts.put(element, 0);
+        }
+        for (TournamentParticipantRecord participant : state.getParticipants()) {
+            if (participant.getPlayerUuid().equals(uuid)) {
+                continue;
+            }
+            if (participant.getAssignedElement() != null && counts.containsKey(participant.getAssignedElement())) {
+                counts.put(participant.getAssignedElement(), counts.get(participant.getAssignedElement()) + 1);
+            }
+        }
+
+        int min = counts.values().stream().min(Integer::compare).orElse(0);
+        
+        List<String> candidates = new ArrayList<>();
+        for (Map.Entry<String, Integer> entry : counts.entrySet()) {
+            if (entry.getValue() == min && !entry.getKey().equals(oldElement)) {
+                candidates.add(entry.getKey());
+            }
+        }
+
+        if (candidates.isEmpty()) {
+            for (Map.Entry<String, Integer> entry : counts.entrySet()) {
+                if (entry.getValue() == min + 1 && !entry.getKey().equals(oldElement)) {
+                    candidates.add(entry.getKey());
+                }
+            }
+        }
+
+        if (candidates.isEmpty()) {
+            for (String element : ELEMENTS) {
+                if (!element.equals(oldElement)) {
+                    candidates.add(element);
+                }
+            }
+        }
+
+        int index = (int) (Math.random() * candidates.size());
+        String newElement = candidates.get(index);
+
+        record.setAssignedElement(newElement);
+        record.setRollsUsed(record.getRollsUsed() + 1);
+        saveState(server);
+
+        return newElement;
     }
 }

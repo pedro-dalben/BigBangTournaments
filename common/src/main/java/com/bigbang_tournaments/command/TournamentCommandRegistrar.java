@@ -2,6 +2,7 @@ package com.bigbang_tournaments.command;
 
 import com.bigbang_tournaments.model.TournamentParticipantRecord;
 import com.bigbang_tournaments.model.TournamentRuleViolation;
+import com.bigbang_tournaments.model.TournamentConfig;
 import com.bigbang_tournaments.service.PokemonTeamService;
 import com.bigbang_tournaments.service.TournamentPokemonBanHelper;
 import com.bigbang_tournaments.service.TournamentBattleService;
@@ -9,6 +10,7 @@ import com.bigbang_tournaments.service.TournamentRulesValidator;
 import com.bigbang_tournaments.service.TournamentStateService;
 import com.bigbang_tournaments.storage.SnapshotStorage;
 import com.bigbang_tournaments.util.TournamentMessages;
+import com.bigbang_tournaments.util.PermissionHelper;
 import com.cobblemon.mod.common.command.argument.SpeciesArgumentType;
 import com.mojang.authlib.GameProfile;
 import com.mojang.brigadier.context.CommandContext;
@@ -113,6 +115,28 @@ public final class TournamentCommandRegistrar {
 
         dispatcher.register(Commands.literal("assistirbatalha")
                 .executes(context -> executeSpectate(context.getSource())));
+
+        dispatcher.register(Commands.literal("criarcampeonato")
+                .requires(source -> source.hasPermission(TournamentStateService.getAdminPermissionLevel(source.getServer())))
+                .then(Commands.argument("dia", StringArgumentType.string())
+                        .then(Commands.argument("horario", StringArgumentType.string())
+                                .then(Commands.argument("nome", StringArgumentType.string())
+                                        .then(Commands.argument("type", StringArgumentType.string())
+                                                .executes(context -> executeCreateTournament(
+                                                        context.getSource(),
+                                                        StringArgumentType.getString(context, "dia"),
+                                                        StringArgumentType.getString(context, "horario"),
+                                                        StringArgumentType.getString(context, "nome"),
+                                                        StringArgumentType.getString(context, "type"))))))));
+
+        dispatcher.register(Commands.literal("campeonato")
+                .then(Commands.literal("inscrever")
+                        .executes(context -> executeRegisterSelf(context.getSource())))
+                .then(Commands.literal("sortearnovamente")
+                        .executes(context -> executeRerollSelf(context.getSource()))));
+
+        dispatcher.register(Commands.literal("participarcampeonato")
+                .executes(context -> executeRegisterSelf(context.getSource())));
     }
 
     private static com.mojang.brigadier.builder.LiteralArgumentBuilder<CommandSourceStack> registerBanCommands() {
@@ -506,5 +530,98 @@ public final class TournamentCommandRegistrar {
             throw GameProfileArgument.ERROR_UNKNOWN_PLAYER.create();
         }
         return new ArrayList<>(profiles).get(0);
+    }
+
+    private static int executeCreateTournament(CommandSourceStack source, String date, String time, String name, String type) {
+        try {
+            MinecraftServer server = source.getServer();
+            com.bigbang_tournaments.model.TournamentState state = TournamentStateService.getState(server);
+            
+            state.getParticipants().clear();
+            state.setActiveBattle(null);
+            state.getBattleHistory().clear();
+            
+            state.setScheduledDate(date);
+            state.setScheduledTime(time);
+            state.setTournamentName(name);
+            state.setTournamentType(type);
+            
+            TournamentStateService.saveState(server);
+            
+            TournamentMessages.sendSuccess(source, "Campeonato '" + name + "' (" + type + ") criado com sucesso para o dia " + date + " as " + time + "!", true);
+            return 1;
+        } catch (Exception e) {
+            TournamentMessages.sendFailure(source, "Erro ao criar campeonato: " + e.getMessage());
+            return 0;
+        }
+    }
+
+    private static int executeRegisterSelf(CommandSourceStack source) {
+        try {
+            if (!(source.getEntity() instanceof ServerPlayer player)) {
+                TournamentMessages.sendFailure(source, "Apenas jogadores podem se inscrever.");
+                return 0;
+            }
+
+            MinecraftServer server = source.getServer();
+            TournamentConfig config = TournamentStateService.getConfig(server);
+            String assignedElement = TournamentStateService.registerPlayer(server, player);
+
+            if (assignedElement != null) {
+                TournamentMessages.send(player, "Voce se inscreveu no campeonato! Seu elemento sorteado foi: " + assignedElement);
+            } else {
+                com.bigbang_tournaments.model.TournamentState state = TournamentStateService.getState(server);
+                TournamentMessages.send(player, "Voce se inscreveu no campeonato " + state.getTournamentName() + "!");
+            }
+
+            String broadcastMsg;
+            try {
+                broadcastMsg = String.format(config.getBroadcastRegistrationMessage(), player.getGameProfile().getName());
+            } catch (Exception e) {
+                broadcastMsg = "O jogador " + player.getGameProfile().getName() + " se inscreveu no campeonato!";
+            }
+            TournamentMessages.broadcast(server, broadcastMsg);
+
+            return 1;
+        } catch (IllegalStateException e) {
+            TournamentMessages.sendFailure(source, e.getMessage());
+            return 0;
+        } catch (IllegalArgumentException e) {
+            TournamentMessages.sendFailure(source, e.getMessage());
+            return 0;
+        } catch (Exception e) {
+            TournamentMessages.sendFailure(source, "Erro ao se inscrever: " + e.getMessage());
+            return 0;
+        }
+    }
+
+    private static int executeRerollSelf(CommandSourceStack source) {
+        try {
+            if (!(source.getEntity() instanceof ServerPlayer player)) {
+                TournamentMessages.sendFailure(source, "Apenas jogadores podem sortear novamente.");
+                return 0;
+            }
+
+            MinecraftServer server = source.getServer();
+            TournamentConfig config = TournamentStateService.getConfig(server);
+            String newElement = TournamentStateService.rerollElement(server, player);
+
+            java.util.UUID uuid = player.getUUID();
+            int rollsUsed = TournamentStateService.getParticipant(server, uuid)
+                    .map(TournamentParticipantRecord::getRollsUsed).orElse(0);
+            int maxRolls = PermissionHelper.getMaxRolls(player, config.getDefaultRerolls());
+
+            TournamentMessages.send(player, "Voce sorteou novamente! Seu novo elemento e: " + newElement + ". Tentativas: (" + rollsUsed + "/" + maxRolls + ")");
+            return 1;
+        } catch (IllegalStateException e) {
+            TournamentMessages.sendFailure(source, e.getMessage());
+            return 0;
+        } catch (IllegalArgumentException e) {
+            TournamentMessages.sendFailure(source, e.getMessage());
+            return 0;
+        } catch (Exception e) {
+            TournamentMessages.sendFailure(source, "Erro ao sortear novamente: " + e.getMessage());
+            return 0;
+        }
     }
 }

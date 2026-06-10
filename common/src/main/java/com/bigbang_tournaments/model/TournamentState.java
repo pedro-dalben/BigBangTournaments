@@ -49,4 +49,41 @@ public class TournamentState {
     public void setBattleHistory(List<TournamentBattleRecord> battleHistory) {
         this.battleHistory = battleHistory;
     }
+
+    private String scheduledDate;
+    private String scheduledTime;
+    private String tournamentName;
+    private String tournamentType;
+
+    public String getScheduledDate() {
+        return scheduledDate;
+    }
+
+    public void setScheduledDate(String scheduledDate) {
+        this.scheduledDate = scheduledDate;
+    }
+
+    public String getScheduledTime() {
+        return scheduledTime;
+    }
+
+    public void setScheduledTime(String scheduledTime) {
+        this.scheduledTime = scheduledTime;
+    }
+
+    public String getTournamentName() {
+        return tournamentName;
+    }
+
+    public void setTournamentName(String tournamentName) {
+        this.tournamentName = tournamentName;
+    }
+
+    public String getTournamentType() {
+        return tournamentType;
+    }
+
+    public void setTournamentType(String tournamentType) {
+        this.tournamentType = tournamentType;
+    }
 }

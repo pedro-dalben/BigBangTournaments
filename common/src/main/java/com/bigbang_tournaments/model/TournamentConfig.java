@@ -47,6 +47,42 @@ public class TournamentConfig {
     private boolean singleSpecialMechanicPerTeam = true;
     private int reconnectWindowSeconds = 300;
     private int adminPermissionLevel = 2;
+    private int defaultRerolls = 1;
+    private String registeredLoginMessage = "Falta %d dias pra o campeonato!";
+    private String unregisteredLoginMessage = "ira acontecer um campeonato no dia %s as %s, para se inscrever digite /participarcampeonato";
+    private String broadcastRegistrationMessage = "O jogador %s se inscreveu no campeonato!";
+
+    public int getDefaultRerolls() {
+        return defaultRerolls;
+    }
+
+    public void setDefaultRerolls(int defaultRerolls) {
+        this.defaultRerolls = defaultRerolls;
+    }
+
+    public String getRegisteredLoginMessage() {
+        return registeredLoginMessage;
+    }
+
+    public void setRegisteredLoginMessage(String registeredLoginMessage) {
+        this.registeredLoginMessage = registeredLoginMessage;
+    }
+
+    public String getUnregisteredLoginMessage() {
+        return unregisteredLoginMessage;
+    }
+
+    public void setUnregisteredLoginMessage(String unregisteredLoginMessage) {
+        this.unregisteredLoginMessage = unregisteredLoginMessage;
+    }
+
+    public String getBroadcastRegistrationMessage() {
+        return broadcastRegistrationMessage;
+    }
+
+    public void setBroadcastRegistrationMessage(String broadcastRegistrationMessage) {
+        this.broadcastRegistrationMessage = broadcastRegistrationMessage;
+    }
 
     public int getSchemaVersion() {
         return schemaVersion;
@@ -203,6 +239,23 @@ public class TournamentConfig {
         if (schemaVersion < 2) {
             changed |= seedDefaultBannedSpecies();
             schemaVersion = 2;
+            changed = true;
+        }
+
+        if (registeredLoginMessage == null) {
+            registeredLoginMessage = "Falta %d dias pra o campeonato!";
+            changed = true;
+        }
+        if (unregisteredLoginMessage == null) {
+            unregisteredLoginMessage = "ira acontecer um campeonato no dia %s as %s, para se inscrever digite /participarcampeonato";
+            changed = true;
+        }
+        if (broadcastRegistrationMessage == null) {
+            broadcastRegistrationMessage = "O jogador %s se inscreveu no campeonato!";
+            changed = true;
+        }
+        if (defaultRerolls <= 0) {
+            defaultRerolls = 1;
             changed = true;
         }
 

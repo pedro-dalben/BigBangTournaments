@@ -95,12 +95,62 @@ public final class TournamentCobblemonEventRegistrar {
         PlatformEvents.SERVER_PLAYER_LOGOUT.subscribe(event -> TournamentBattleService.handleDisconnect(event.getPlayer()));
 
         PlatformEvents.SERVER_PLAYER_LOGIN.subscribe(event -> {
-            if (event.getPlayer().getServer() == null) {
+            ServerPlayer player = event.getPlayer();
+            net.minecraft.server.MinecraftServer server = player.getServer();
+            if (server == null) {
                 return;
             }
-            if (TournamentStateService.getActiveBattle(event.getPlayer().getServer()) != null
-                    && TournamentStateService.getActiveBattle(event.getPlayer().getServer()).isInterruptedByRestart()) {
-                TournamentMessages.send(event.getPlayer(), "Partida ativa foi interrompida por restart. Resultado deve ser definido manualmente.");
+            if (TournamentStateService.getActiveBattle(server) != null
+                    && TournamentStateService.getActiveBattle(server).isInterruptedByRestart()) {
+                TournamentMessages.send(player, "Partida ativa foi interrompida por restart. Resultado deve ser definido manualmente.");
+            }
+
+            try {
+                com.bigbang_tournaments.model.TournamentState state = TournamentStateService.getState(server);
+                if (state.getTournamentName() != null && !state.getTournamentName().isBlank()) {
+                    com.bigbang_tournaments.model.TournamentConfig config = TournamentStateService.getConfig(server);
+                    boolean isRegistered = TournamentStateService.getParticipant(server, player.getUUID()).isPresent();
+                    
+                    if (isRegistered) {
+                        long days = -1;
+                        try {
+                            java.time.format.DateTimeFormatter formatter = java.time.format.DateTimeFormatter.ofPattern("dd/MM/yyyy");
+                            java.time.LocalDate tournamentDate = java.time.LocalDate.parse(state.getScheduledDate(), formatter);
+                            java.time.LocalDate today = java.time.LocalDate.now();
+                            days = java.time.temporal.ChronoUnit.DAYS.between(today, tournamentDate);
+                        } catch (Exception ignored) {
+                            try {
+                                java.time.format.DateTimeFormatter formatter2 = java.time.format.DateTimeFormatter.ofPattern("dd-MM-yyyy");
+                                java.time.LocalDate tournamentDate = java.time.LocalDate.parse(state.getScheduledDate(), formatter2);
+                                java.time.LocalDate today = java.time.LocalDate.now();
+                                days = java.time.temporal.ChronoUnit.DAYS.between(today, tournamentDate);
+                            } catch (Exception ignored2) {
+                            }
+                        }
+                        
+                        String formatted;
+                        if (days >= 0) {
+                            try {
+                                formatted = String.format(config.getRegisteredLoginMessage(), days);
+                            } catch (Exception e) {
+                                formatted = "Falta " + days + " dias pra o campeonato!";
+                            }
+                        } else {
+                            formatted = "Falta pouco para o campeonato agendado para o dia " + state.getScheduledDate() + " as " + state.getScheduledTime() + "!";
+                        }
+                        TournamentMessages.send(player, formatted);
+                    } else {
+                        String formatted;
+                        try {
+                            formatted = String.format(config.getUnregisteredLoginMessage(), state.getScheduledDate(), state.getScheduledTime());
+                        } catch (Exception e) {
+                            formatted = "ira acontecer um campeonato no dia " + state.getScheduledDate() + " as " + state.getScheduledTime() + ", para se inscrever digite /participarcampeonato";
+                        }
+                        TournamentMessages.send(player, formatted);
+                    }
+                }
+            } catch (Exception e) {
+                BigBangTournaments.LOGGER.error("Erro no handler de login do campeonato", e);
             }
         });
 

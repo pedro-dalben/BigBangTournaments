@@ -124,4 +124,23 @@ public class TournamentParticipantRecord {
     public void setLastViolations(List<TournamentRuleViolation> lastViolations) {
         this.lastViolations = lastViolations;
     }
+
+    private String assignedElement;
+    private int rollsUsed;
+
+    public String getAssignedElement() {
+        return assignedElement;
+    }
+
+    public void setAssignedElement(String assignedElement) {
+        this.assignedElement = assignedElement;
+    }
+
+    public int getRollsUsed() {
+        return rollsUsed;
+    }
+
+    public void setRollsUsed(int rollsUsed) {
+        this.rollsUsed = rollsUsed;
+    }
 }
