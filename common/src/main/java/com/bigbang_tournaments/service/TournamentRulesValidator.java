@@ -26,15 +26,23 @@ public final class TournamentRulesValidator {
     }
 
     public static List<TournamentRuleViolation> validatePlayer(ServerPlayer player, int expectedLevel, boolean includeRosterDiff) {
+        return validatePlayer(player, expectedLevel, includeRosterDiff, true);
+    }
+
+    public static List<TournamentRuleViolation> validatePlayer(ServerPlayer player, int expectedLevel, boolean includeRosterDiff, boolean checkLevel) {
         MinecraftServer server = player.getServer();
         TournamentConfig config = server != null ? TournamentStateService.getConfig(server) : new TournamentConfig();
         TournamentSnapshot snapshot = includeRosterDiff && server != null
                 ? SnapshotStorage.loadSnapshot(server, player.getUUID())
                 : null;
-        return validatePlayer(player, expectedLevel, config, snapshot);
+        return validatePlayer(player, expectedLevel, config, snapshot, checkLevel);
     }
 
     public static List<TournamentRuleViolation> validatePlayer(ServerPlayer player, int expectedLevel, TournamentConfig config, TournamentSnapshot lockedSnapshot) {
+        return validatePlayer(player, expectedLevel, config, lockedSnapshot, true);
+    }
+
+    public static List<TournamentRuleViolation> validatePlayer(ServerPlayer player, int expectedLevel, TournamentConfig config, TournamentSnapshot lockedSnapshot, boolean checkLevel) {
         Collection<Pokemon> party = new ArrayList<>();
         Cobblemon.INSTANCE.getStorage().getParty(player).forEach(pokemon -> {
             if (pokemon != null) {
@@ -64,7 +72,7 @@ public final class TournamentRulesValidator {
                 seenSpecies.put(speciesKey, speciesName);
             }
 
-            if (pokemon.getLevel() != expectedLevel) {
+            if (checkLevel && pokemon.getLevel() != expectedLevel) {
                 violations.add(violation(TournamentRuleViolationType.INVALID_LEVEL,
                         "Pokemon fora do nivel esperado: " + speciesName + " esta no level " + pokemon.getLevel() + " (esperado " + expectedLevel + ").",
                         speciesName));

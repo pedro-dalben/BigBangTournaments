@@ -176,6 +176,7 @@ public final class TournamentBattleService {
         activeBattle.setStatus(TournamentBattleStatus.FINISHED);
         activeBattle.setUpdatedAt(System.currentTimeMillis());
         releaseAreaLocks(activeBattle);
+        sendPlayersToSpectatorArea(server, activeBattle);
         TournamentMessages.broadcastManualWin(server, activeBattle.getWinnerName());
         TournamentStateService.archiveActiveBattle(server);
         return 1;
@@ -193,15 +194,24 @@ public final class TournamentBattleService {
             return;
         }
 
-        teleportToPosition(player, spectatorPos);
-        TournamentMessages.sendSpectatorTeleported(player);
-
         TournamentBattleRecord activeBattle = TournamentStateService.getActiveBattle(server);
+        boolean shouldTeleport = activeBattle == null
+                || activeBattle.getStatus() != TournamentBattleStatus.ACTIVE
+                || !isWithinSpectatorRange(player, spectatorPos, server);
+
+        if (shouldTeleport) {
+            teleportToPosition(player, spectatorPos);
+            TournamentMessages.sendSpectatorTeleported(player);
+        }
+
         if (activeBattle == null || activeBattle.getStatus() != TournamentBattleStatus.ACTIVE) {
             return;
         }
 
         ServerPlayer target = server.getPlayerList().getPlayer(activeBattle.getPlayer1Uuid());
+        if (target == null || target.getUUID().equals(player.getUUID())) {
+            target = server.getPlayerList().getPlayer(activeBattle.getPlayer2Uuid());
+        }
         if (target != null && !target.getUUID().equals(player.getUUID())) {
             SpectateBattleHandler.INSTANCE.spectateBattle(target, player);
         }
@@ -293,6 +303,7 @@ public final class TournamentBattleService {
         activeBattle.setUpdatedAt(System.currentTimeMillis());
         battle.saveBattleLog();
         releaseAreaLocks(activeBattle);
+        sendPlayersToSpectatorArea(server, activeBattle);
         TournamentMessages.broadcastBattleWin(server, activeBattle.getWinnerName(), activeBattle.getLoserName());
         TournamentStateService.archiveActiveBattle(server);
     }
@@ -414,6 +425,23 @@ public final class TournamentBattleService {
         player.teleportTo(level, position.getX(), position.getY(), position.getZ(), position.getYaw(), position.getPitch());
     }
 
+    private static boolean isWithinSpectatorRange(ServerPlayer player, TournamentPosition spectatorPos, MinecraftServer server) {
+        if (spectatorPos == null || player.getServer() == null) {
+            return false;
+        }
+
+        ServerLevel level = server.getLevel(ResourceKey.create(Registries.DIMENSION, ResourceLocation.parse(spectatorPos.getDimension())));
+        if (level == null || !player.level().dimension().location().equals(level.dimension().location())) {
+            return false;
+        }
+
+        double dx = player.getX() - spectatorPos.getX();
+        double dy = player.getY() - spectatorPos.getY();
+        double dz = player.getZ() - spectatorPos.getZ();
+        double maxDistance = Math.max(24.0D, TournamentStateService.getConfig(server).getArenaRadius() * 6.0D);
+        return (dx * dx) + (dy * dy) + (dz * dz) <= maxDistance * maxDistance;
+    }
+
     private static void enableAreaLock(MinecraftServer server, ServerPlayer player, TournamentPosition center) {
         AREA_LOCKS.put(player.getUUID(), new AreaLock(center, TournamentStateService.getConfig(server).getArenaRadius(), 0L));
     }
@@ -421,6 +449,25 @@ public final class TournamentBattleService {
     private static void releaseAreaLocks(TournamentBattleRecord battleRecord) {
         AREA_LOCKS.remove(battleRecord.getPlayer1Uuid());
         AREA_LOCKS.remove(battleRecord.getPlayer2Uuid());
+    }
+
+    private static void sendPlayersToSpectatorArea(MinecraftServer server, TournamentBattleRecord battleRecord) {
+        TournamentPosition spectatorPos = TournamentStateService.getState(server).getArena().getSpectator();
+        if (spectatorPos == null) {
+            return;
+        }
+
+        com.cobblemon.mod.common.api.scheduling.ServerTaskTracker.INSTANCE.after(1F, () -> {
+            ServerPlayer player1 = server.getPlayerList().getPlayer(battleRecord.getPlayer1Uuid());
+            ServerPlayer player2 = server.getPlayerList().getPlayer(battleRecord.getPlayer2Uuid());
+            if (player1 != null) {
+                teleportToPosition(player1, spectatorPos);
+            }
+            if (player2 != null) {
+                teleportToPosition(player2, spectatorPos);
+            }
+            return Unit.INSTANCE;
+        });
     }
 
     private static boolean containsPlayers(TournamentBattleRecord activeBattle, Iterable<UUID> playerUuids) {

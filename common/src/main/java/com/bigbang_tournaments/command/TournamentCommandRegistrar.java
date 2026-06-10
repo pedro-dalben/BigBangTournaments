@@ -173,7 +173,7 @@ public final class TournamentCommandRegistrar {
         }
 
         TournamentStateService.upsertParticipant(target);
-        List<TournamentRuleViolation> violations = TournamentRulesValidator.validatePlayer(target, level, false);
+        List<TournamentRuleViolation> violations = TournamentRulesValidator.validatePlayer(target, level, false, false);
         if (violations.isEmpty()) {
             TournamentMessages.sendSuccess(source, target.getGameProfile().getName() + " esta com o time valido para level " + level + ".", true);
             return 1;
@@ -204,7 +204,7 @@ public final class TournamentCommandRegistrar {
                 continue;
             }
 
-            List<TournamentRuleViolation> violations = TournamentRulesValidator.validatePlayer(onlinePlayer, level, false);
+            List<TournamentRuleViolation> violations = TournamentRulesValidator.validatePlayer(onlinePlayer, level, false, false);
             if (violations.isEmpty()) {
                 validCount++;
             } else {
@@ -223,12 +223,15 @@ public final class TournamentCommandRegistrar {
         }
 
         TournamentStateService.upsertParticipant(target);
-        List<TournamentRuleViolation> violations = TournamentRulesValidator.validatePlayer(target, level, false);
+        List<TournamentRuleViolation> violations = TournamentRulesValidator.validatePlayer(target, level, false, false);
         if (!violations.isEmpty()) {
             TournamentStateService.markPending(source.getServer(), target, level, violations);
             TournamentMessages.broadcastInvalidTeam(source.getServer(), target.getGameProfile().getName());
             TournamentMessages.sendInvalidTeam(target, TournamentRulesValidator.toReasonList(violations));
             TournamentMessages.sendFailure(source, "O time de " + target.getGameProfile().getName() + " esta invalido e foi marcado como pendente.");
+            for (String reason : TournamentRulesValidator.toReasonList(violations)) {
+                source.sendFailure(Component.literal("- " + reason));
+            }
             return 0;
         }
 

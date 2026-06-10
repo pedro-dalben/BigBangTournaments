@@ -270,7 +270,7 @@ public final class TournamentStateService {
             return;
         }
 
-        List<TournamentRuleViolation> violations = TournamentRulesValidator.validatePlayer(player, level, false);
+        List<TournamentRuleViolation> violations = TournamentRulesValidator.validatePlayer(player, level, false, false);
         if (!violations.isEmpty()) {
             optionalRecord.get().setLastViolations(new ArrayList<>(violations));
             optionalRecord.get().setUpdatedAt(System.currentTimeMillis());
