@@ -57,6 +57,22 @@ public final class TournamentStateService {
         TournamentConfigStorage.save(server, getConfig(server));
     }
 
+    public static boolean requiresElementTournamentType(String tournamentType) {
+        return "singleelement".equalsIgnoreCase(tournamentType)
+                || "singletype".equalsIgnoreCase(tournamentType)
+                || "monotype".equalsIgnoreCase(tournamentType);
+    }
+
+    public static String normalizeTournamentType(String tournamentType) {
+        if (tournamentType == null) {
+            return null;
+        }
+        if ("singletype".equalsIgnoreCase(tournamentType)) {
+            return "singleelement";
+        }
+        return tournamentType;
+    }
+
     public static TournamentParticipantRecord upsertParticipant(MinecraftServer server, GameProfile profile) {
         TournamentState state = getState(server);
         TournamentParticipantRecord record = getParticipant(server, profile.getId()).orElseGet(() -> {
@@ -65,9 +81,30 @@ public final class TournamentStateService {
             return created;
         });
         record.setPlayerName(profile.getName());
+
+        boolean needsElement = requiresElementTournamentType(state.getTournamentType());
+        if (needsElement && record.getAssignedElement() == null) {
+            String assignedElement = chooseElementForNewParticipant(state);
+            record.setAssignedElement(assignedElement);
+            record.setRollsUsed(0);
+        }
+
         record.setUpdatedAt(System.currentTimeMillis());
         saveState(server);
         return record;
+    }
+
+    public static synchronized String assignElementToExistingParticipant(MinecraftServer server, TournamentParticipantRecord record) {
+        TournamentState state = getState(server);
+        boolean needsElement = requiresElementTournamentType(state.getTournamentType());
+        if (needsElement && record.getAssignedElement() == null) {
+            String assignedElement = chooseElementForNewParticipant(state);
+            record.setAssignedElement(assignedElement);
+            record.setRollsUsed(0);
+            saveState(server);
+            return assignedElement;
+        }
+        return record.getAssignedElement();
     }
 
     public static TournamentParticipantRecord upsertParticipant(ServerPlayer player) {
@@ -301,6 +338,33 @@ public final class TournamentStateService {
         "🧚 Fada", "🐉 Dragão", "☠️ Venenoso", "🧠 Psíquico", "🥊 Lutador", "🌑 Sombrio", "🌎 Terra"
     );
 
+    public static boolean isSameElement(String element1, String element2) {
+        if (element1 == null || element2 == null) {
+            return false;
+        }
+        return cleanElement(element1).equals(cleanElement(element2));
+    }
+
+    public static String getCanonicalElement(String element) {
+        if (element == null) {
+            return null;
+        }
+        for (String el : ELEMENTS) {
+            if (isSameElement(el, element)) {
+                return el;
+            }
+        }
+        return element;
+    }
+
+    private static String cleanElement(String element) {
+        if (element == null) {
+            return "";
+        }
+        String normalized = java.text.Normalizer.normalize(element, java.text.Normalizer.Form.NFD);
+        return normalized.replaceAll("[^a-zA-Z0-9]", "").toLowerCase();
+    }
+
     public static synchronized String registerPlayer(MinecraftServer server, ServerPlayer player) {
         TournamentState state = getState(server);
         if (state.getTournamentName() == null || state.getTournamentName().trim().isEmpty()) {
@@ -308,14 +372,18 @@ public final class TournamentStateService {
         }
 
         UUID uuid = player.getUUID();
-        if (getParticipant(server, uuid).isPresent()) {
-            throw new IllegalArgumentException("Voce ja esta inscrito neste campeonato.");
+        Optional<TournamentParticipantRecord> existing = getParticipant(server, uuid);
+
+        boolean needsElement = requiresElementTournamentType(state.getTournamentType());
+
+        if (existing.isPresent()) {
+            throw new IllegalArgumentException("Voce ja esta participando desse campeonato.");
         }
 
         TournamentParticipantRecord record = new TournamentParticipantRecord(uuid, player.getGameProfile().getName());
         String assignedElement = null;
 
-        if ("singleelement".equalsIgnoreCase(state.getTournamentType())) {
+        if (needsElement) {
             assignedElement = chooseElementForNewParticipant(state);
             record.setAssignedElement(assignedElement);
             record.setRollsUsed(0);
@@ -333,8 +401,9 @@ public final class TournamentStateService {
             counts.put(element, 0);
         }
         for (TournamentParticipantRecord participant : state.getParticipants()) {
-            if (participant.getAssignedElement() != null && counts.containsKey(participant.getAssignedElement())) {
-                counts.put(participant.getAssignedElement(), counts.get(participant.getAssignedElement()) + 1);
+            String element = getCanonicalElement(participant.getAssignedElement());
+            if (element != null && counts.containsKey(element)) {
+                counts.put(element, counts.get(element) + 1);
             }
         }
 
@@ -355,8 +424,8 @@ public final class TournamentStateService {
         if (state.getTournamentName() == null || state.getTournamentName().trim().isEmpty()) {
             throw new IllegalStateException("Nao ha nenhum campeonato ativo no momento.");
         }
-        if (!"singleelement".equalsIgnoreCase(state.getTournamentType())) {
-            throw new IllegalStateException("Este comando so esta disponivel para campeonatos do tipo singleelement.");
+        if (!requiresElementTournamentType(state.getTournamentType())) {
+            throw new IllegalStateException("Este comando so esta disponivel para campeonatos do tipo singleelement ou monotype.");
         }
 
         UUID uuid = player.getUUID();
@@ -369,8 +438,8 @@ public final class TournamentStateService {
             throw new IllegalStateException("Voce ja atingiu o limite de sortear novamente (" + record.getRollsUsed() + "/" + maxRolls + ").");
         }
 
-        String oldElement = record.getAssignedElement() != null ? record.getAssignedElement() : "";
-        
+        String oldElement = getCanonicalElement(record.getAssignedElement());
+
         Map<String, Integer> counts = new HashMap<>();
         for (String element : ELEMENTS) {
             counts.put(element, 0);
@@ -379,8 +448,9 @@ public final class TournamentStateService {
             if (participant.getPlayerUuid().equals(uuid)) {
                 continue;
             }
-            if (participant.getAssignedElement() != null && counts.containsKey(participant.getAssignedElement())) {
-                counts.put(participant.getAssignedElement(), counts.get(participant.getAssignedElement()) + 1);
+            String element = getCanonicalElement(participant.getAssignedElement());
+            if (element != null && counts.containsKey(element)) {
+                counts.put(element, counts.get(element) + 1);
             }
         }
 
@@ -388,14 +458,14 @@ public final class TournamentStateService {
         
         List<String> candidates = new ArrayList<>();
         for (Map.Entry<String, Integer> entry : counts.entrySet()) {
-            if (entry.getValue() == min && !entry.getKey().equals(oldElement)) {
+            if (entry.getValue() == min && !isSameElement(entry.getKey(), oldElement)) {
                 candidates.add(entry.getKey());
             }
         }
 
         if (candidates.isEmpty()) {
             for (Map.Entry<String, Integer> entry : counts.entrySet()) {
-                if (entry.getValue() == min + 1 && !entry.getKey().equals(oldElement)) {
+                if (entry.getValue() == min + 1 && !isSameElement(entry.getKey(), oldElement)) {
                     candidates.add(entry.getKey());
                 }
             }
@@ -403,7 +473,7 @@ public final class TournamentStateService {
 
         if (candidates.isEmpty()) {
             for (String element : ELEMENTS) {
-                if (!element.equals(oldElement)) {
+                if (!isSameElement(element, oldElement)) {
                     candidates.add(element);
                 }
             }
@@ -411,6 +481,9 @@ public final class TournamentStateService {
 
         int index = (int) (Math.random() * candidates.size());
         String newElement = candidates.get(index);
+        if (isSameElement(newElement, oldElement)) {
+            throw new IllegalStateException("Nao foi possivel sortear um elemento diferente do atual. Tente novamente.");
+        }
 
         record.setAssignedElement(newElement);
         record.setRollsUsed(record.getRollsUsed() + 1);

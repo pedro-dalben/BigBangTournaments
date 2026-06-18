@@ -24,6 +24,8 @@ import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.commands.Commands;
 import net.minecraft.commands.arguments.GameProfileArgument;
 import net.minecraft.commands.arguments.EntityArgument;
+import net.minecraft.commands.arguments.ResourceLocationArgument;
+import net.minecraft.resources.ResourceLocation;
 import net.minecraft.network.chat.Component;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerPlayer;
@@ -118,18 +120,34 @@ public final class TournamentCommandRegistrar {
 
         dispatcher.register(Commands.literal("criarcampeonato")
                 .requires(source -> source.hasPermission(TournamentStateService.getAdminPermissionLevel(source.getServer())))
-                .then(Commands.argument("dia", StringArgumentType.string())
-                        .then(Commands.argument("horario", StringArgumentType.string())
-                                .then(Commands.argument("nome", StringArgumentType.string())
-                                        .then(Commands.argument("type", StringArgumentType.string())
+                .then(Commands.argument("dia", ResourceLocationArgument.id())
+                        .then(Commands.argument("horario", ResourceLocationArgument.id())
+                                .then(Commands.argument("type", StringArgumentType.word())
+                                        .suggests((context, builder) -> {
+                                            builder.suggest("singleelement");
+                                            builder.suggest("singletype");
+                                            builder.suggest("monotype");
+                                            return builder.buildFuture();
+                                        })
+                                        .then(Commands.argument("nome", StringArgumentType.greedyString())
                                                 .executes(context -> executeCreateTournament(
                                                         context.getSource(),
-                                                        StringArgumentType.getString(context, "dia"),
-                                                        StringArgumentType.getString(context, "horario"),
+                                                        getCleanResourceLocationString(context, "dia"),
+                                                        getCleanResourceLocationString(context, "horario"),
                                                         StringArgumentType.getString(context, "nome"),
                                                         StringArgumentType.getString(context, "type"))))))));
 
         dispatcher.register(Commands.literal("campeonato")
+                .then(Commands.literal("inscrever")
+                        .executes(context -> executeRegisterSelf(context.getSource())))
+                .then(Commands.literal("participar")
+                        .executes(context -> executeRegisterSelf(context.getSource())))
+                .then(Commands.literal("sortearnovamente")
+                        .executes(context -> executeRerollSelf(context.getSource()))));
+
+        dispatcher.register(Commands.literal("torneio")
+                .then(Commands.literal("participar")
+                        .executes(context -> executeRegisterSelf(context.getSource())))
                 .then(Commands.literal("inscrever")
                         .executes(context -> executeRegisterSelf(context.getSource())))
                 .then(Commands.literal("sortearnovamente")
@@ -532,6 +550,15 @@ public final class TournamentCommandRegistrar {
         return new ArrayList<>(profiles).get(0);
     }
 
+    private static String getCleanResourceLocationString(CommandContext<CommandSourceStack> context, String argumentName) {
+        ResourceLocation loc = ResourceLocationArgument.getId(context, argumentName);
+        if (loc.getNamespace().equals("minecraft")) {
+            return loc.getPath();
+        } else {
+            return loc.getNamespace() + ":" + loc.getPath();
+        }
+    }
+
     private static int executeCreateTournament(CommandSourceStack source, String date, String time, String name, String type) {
         try {
             MinecraftServer server = source.getServer();
@@ -544,7 +571,7 @@ public final class TournamentCommandRegistrar {
             state.setScheduledDate(date);
             state.setScheduledTime(time);
             state.setTournamentName(name);
-            state.setTournamentType(type);
+            state.setTournamentType(TournamentStateService.normalizeTournamentType(type));
             
             TournamentStateService.saveState(server);
             
@@ -566,21 +593,22 @@ public final class TournamentCommandRegistrar {
             MinecraftServer server = source.getServer();
             TournamentConfig config = TournamentStateService.getConfig(server);
             String assignedElement = TournamentStateService.registerPlayer(server, player);
-
-            if (assignedElement != null) {
-                TournamentMessages.send(player, "Voce se inscreveu no campeonato! Seu elemento sorteado foi: " + assignedElement);
-            } else {
-                com.bigbang_tournaments.model.TournamentState state = TournamentStateService.getState(server);
-                TournamentMessages.send(player, "Voce se inscreveu no campeonato " + state.getTournamentName() + "!");
-            }
+            com.bigbang_tournaments.model.TournamentState state = TournamentStateService.getState(server);
+            boolean needsElement = TournamentStateService.requiresElementTournamentType(state.getTournamentType());
 
             String broadcastMsg;
             try {
                 broadcastMsg = String.format(config.getBroadcastRegistrationMessage(), player.getGameProfile().getName());
             } catch (Exception e) {
-                broadcastMsg = "O jogador " + player.getGameProfile().getName() + " se inscreveu no campeonato!";
+                broadcastMsg = "O " + player.getGameProfile().getName() + " se inscreveu no campeonato!";
             }
             TournamentMessages.broadcast(server, broadcastMsg);
+
+            if (needsElement && assignedElement != null) {
+                TournamentMessages.send(player, "Voce se inscreveu. Seu tipo e: " + assignedElement + ".");
+            } else {
+                TournamentMessages.send(player, "Voce se inscreveu no campeonato " + state.getTournamentName() + "!");
+            }
 
             return 1;
         } catch (IllegalStateException e) {

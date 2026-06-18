@@ -112,6 +112,13 @@ public final class TournamentCobblemonEventRegistrar {
                     boolean isRegistered = TournamentStateService.getParticipant(server, player.getUUID()).isPresent();
                     
                     if (isRegistered) {
+                        var recordOpt = TournamentStateService.getParticipant(server, player.getUUID());
+                        String el = null;
+                        if (recordOpt.isPresent()) {
+                            var record = recordOpt.get();
+                            el = TournamentStateService.assignElementToExistingParticipant(server, record);
+                        }
+
                         long days = -1;
                         try {
                             java.time.format.DateTimeFormatter formatter = java.time.format.DateTimeFormatter.ofPattern("dd/MM/yyyy");
@@ -133,18 +140,21 @@ public final class TournamentCobblemonEventRegistrar {
                             try {
                                 formatted = String.format(config.getRegisteredLoginMessage(), days);
                             } catch (Exception e) {
-                                formatted = "Falta " + days + " dias pra o campeonato!";
+                                formatted = String.format("Faltam %d dias para o campeonato!", days);
                             }
                         } else {
-                            formatted = "Falta pouco para o campeonato agendado para o dia " + state.getScheduledDate() + " as " + state.getScheduledTime() + "!";
+                            formatted = "Faltam 0 dias para o campeonato!";
                         }
                         TournamentMessages.send(player, formatted);
+                        if (el != null) {
+                            TournamentMessages.send(player, "Seu elemento no campeonato e: " + el);
+                        }
                     } else {
                         String formatted;
                         try {
                             formatted = String.format(config.getUnregisteredLoginMessage(), state.getScheduledDate(), state.getScheduledTime());
                         } catch (Exception e) {
-                            formatted = "ira acontecer um campeonato no dia " + state.getScheduledDate() + " as " + state.getScheduledTime() + ", para se inscrever digite /participarcampeonato";
+                            formatted = "ira acontecer um campeonato no dia " + state.getScheduledDate() + " as " + state.getScheduledTime() + ", para se inscrever digite /torneio participar";
                         }
                         TournamentMessages.send(player, formatted);
                     }

@@ -48,9 +48,9 @@ public class TournamentConfig {
     private int reconnectWindowSeconds = 300;
     private int adminPermissionLevel = 2;
     private int defaultRerolls = 1;
-    private String registeredLoginMessage = "Falta %d dias pra o campeonato!";
-    private String unregisteredLoginMessage = "ira acontecer um campeonato no dia %s as %s, para se inscrever digite /participarcampeonato";
-    private String broadcastRegistrationMessage = "O jogador %s se inscreveu no campeonato!";
+    private String registeredLoginMessage = "Faltam %d dias para o campeonato!";
+    private String unregisteredLoginMessage = "ira acontecer um campeonato no dia %s as %s, para se inscrever digite /torneio participar";
+    private String broadcastRegistrationMessage = "O %s se inscreveu no campeonato!";
 
     public int getDefaultRerolls() {
         return defaultRerolls;
@@ -242,16 +242,16 @@ public class TournamentConfig {
             changed = true;
         }
 
-        if (registeredLoginMessage == null) {
-            registeredLoginMessage = "Falta %d dias pra o campeonato!";
+        if (registeredLoginMessage == null || "Falta %d dias pra o campeonato!".equals(registeredLoginMessage)) {
+            registeredLoginMessage = "Faltam %d dias para o campeonato!";
             changed = true;
         }
-        if (unregisteredLoginMessage == null) {
-            unregisteredLoginMessage = "ira acontecer um campeonato no dia %s as %s, para se inscrever digite /participarcampeonato";
+        if (unregisteredLoginMessage == null || "ira acontecer um campeonato no dia %s as %s, para se inscrever digite /participarcampeonato".equals(unregisteredLoginMessage)) {
+            unregisteredLoginMessage = "ira acontecer um campeonato no dia %s as %s, para se inscrever digite /torneio participar";
             changed = true;
         }
-        if (broadcastRegistrationMessage == null) {
-            broadcastRegistrationMessage = "O jogador %s se inscreveu no campeonato!";
+        if (broadcastRegistrationMessage == null || "O jogador %s se inscreveu no campeonato!".equals(broadcastRegistrationMessage)) {
+            broadcastRegistrationMessage = "O %s se inscreveu no campeonato!";
             changed = true;
         }
         if (defaultRerolls <= 0) {
