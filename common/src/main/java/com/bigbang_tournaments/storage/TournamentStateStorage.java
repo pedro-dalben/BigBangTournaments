@@ -43,10 +43,18 @@ public final class TournamentStateStorage {
 
         try (Reader reader = Files.newBufferedReader(path, StandardCharsets.UTF_8)) {
             TournamentState state = GSON.fromJson(reader, TournamentState.class);
-            return state != null ? state : new TournamentState();
+            if (state == null) {
+                state = new TournamentState();
+            }
+            if (state.normalizeAndMigrate()) {
+                save(server, state);
+            }
+            return state;
         } catch (Exception e) {
             LOGGER.error("Failed to load tournament state, using empty state", e);
-            return new TournamentState();
+            TournamentState state = new TournamentState();
+            state.normalizeAndMigrate();
+            return state;
         }
     }
 

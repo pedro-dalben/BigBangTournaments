@@ -2,6 +2,7 @@ package com.bigbang_tournaments.service;
 
 import com.bigbang_tournaments.model.TournamentBattleRecord;
 import com.bigbang_tournaments.model.TournamentBattleStatus;
+import com.bigbang_tournaments.model.TournamentCheckInStatus;
 import com.bigbang_tournaments.model.TournamentConfig;
 import com.bigbang_tournaments.model.TournamentParticipantRecord;
 import com.bigbang_tournaments.model.TournamentParticipantStatus;
@@ -58,17 +59,27 @@ public final class TournamentStateService {
     }
 
     public static boolean requiresElementTournamentType(String tournamentType) {
-        return "singleelement".equalsIgnoreCase(tournamentType)
-                || "singletype".equalsIgnoreCase(tournamentType)
-                || "monotype".equalsIgnoreCase(tournamentType);
+        return TournamentModeRegistry.resolve(tournamentType).requiresElementAssignment();
+    }
+
+    public static boolean isCheckInOpen(TournamentState state) {
+        return state != null && "CHECK_IN".equals(state.getTournamentPhase());
+    }
+
+    public static boolean isReady(TournamentState state) {
+        return state != null && "READY".equals(state.getTournamentPhase());
     }
 
     public static String normalizeTournamentType(String tournamentType) {
-        if (tournamentType == null) {
-            return null;
+        if (tournamentType == null || tournamentType.trim().isEmpty()) {
+            return "standard";
         }
-        if ("singletype".equalsIgnoreCase(tournamentType)) {
-            return "singleelement";
+        String lower = tournamentType.toLowerCase().trim();
+        if ("singletype".equals(lower) || "singleelement".equals(lower) || "monotype".equals(lower)) {
+            return "singletype";
+        }
+        if ("standard".equals(lower)) {
+            return "standard";
         }
         return tournamentType;
     }
@@ -128,6 +139,9 @@ public final class TournamentStateService {
         if (removed) {
             cancelPendingValidation(server, playerUuid);
             saveState(server);
+            if (isCheckInOpen(getState(server))) {
+                checkIfAllCheckedIn(server);
+            }
         }
         return removed;
     }
@@ -152,6 +166,7 @@ public final class TournamentStateService {
         record.setPendingValidation(true);
         record.setPreparedLevel(level);
         record.setStatus(TournamentParticipantStatus.PENDING_VALIDATION);
+        clearTeamComposition(record);
         record.setPendingSince(now);
         record.setUpdatedAt(now);
         record.setLastViolations(new ArrayList<>(violations));
@@ -181,6 +196,7 @@ public final class TournamentStateService {
             record.setRosterLocked(false);
             record.setPendingValidation(false);
             record.setStatus(TournamentParticipantStatus.UNLOCKED);
+            clearTeamComposition(record);
             record.setPendingSince(0L);
             record.setNextValidationAt(0L);
             record.setUpdatedAt(System.currentTimeMillis());
@@ -196,12 +212,64 @@ public final class TournamentStateService {
             record.setRosterLocked(false);
             record.setPendingValidation(false);
             record.setStatus(TournamentParticipantStatus.RESTORED);
+            clearTeamComposition(record);
             record.setPendingSince(0L);
             record.setNextValidationAt(0L);
             record.setUpdatedAt(System.currentTimeMillis());
             cancelPendingValidation(server, playerUuid);
             saveState(server);
         });
+    }
+
+    public static void markCheckInAwaiting(MinecraftServer server, UUID playerUuid) {
+        getParticipant(server, playerUuid).ifPresent(record -> {
+            record.setCheckInStatus(TournamentCheckInStatus.AWAITING);
+            record.setCheckedInAt(0L);
+            record.setUpdatedAt(System.currentTimeMillis());
+            saveState(server);
+        });
+    }
+
+    public static void markCheckInConfirmed(MinecraftServer server, UUID playerUuid) {
+        getParticipant(server, playerUuid).ifPresent(record -> {
+            record.setCheckInStatus(TournamentCheckInStatus.CHECKED_IN);
+            record.setCheckedInAt(System.currentTimeMillis());
+            record.setUpdatedAt(System.currentTimeMillis());
+            saveState(server);
+        });
+    }
+
+    public static void markCheckInAbsent(MinecraftServer server, UUID playerUuid) {
+        getParticipant(server, playerUuid).ifPresent(record -> {
+            record.setCheckInStatus(TournamentCheckInStatus.ABSENT);
+            record.setUpdatedAt(System.currentTimeMillis());
+            saveState(server);
+        });
+    }
+
+    public static void resetCheckInState(MinecraftServer server, UUID playerUuid) {
+        getParticipant(server, playerUuid).ifPresent(record -> {
+            record.setCheckInStatus(TournamentCheckInStatus.NOT_STARTED);
+            record.setCheckedInAt(0L);
+            record.setUpdatedAt(System.currentTimeMillis());
+            saveState(server);
+        });
+    }
+
+    public static void applyTeamComposition(MinecraftServer server, UUID playerUuid, String compositionMode, UUID jokerPokemonUuid, String jokerSpeciesName) {
+        getParticipant(server, playerUuid).ifPresent(record -> {
+            record.setTeamCompositionMode(compositionMode);
+            record.setJokerPokemonUuid(jokerPokemonUuid);
+            record.setJokerSpeciesName(jokerSpeciesName);
+            record.setUpdatedAt(System.currentTimeMillis());
+            saveState(server);
+        });
+    }
+
+    public static void clearTeamComposition(TournamentParticipantRecord record) {
+        record.setTeamCompositionMode(null);
+        record.setJokerPokemonUuid(null);
+        record.setJokerSpeciesName(null);
     }
 
     public static boolean areAllParticipantsPrepared(MinecraftServer server) {
@@ -252,6 +320,7 @@ public final class TournamentStateService {
             float delaySeconds = nextValidationAt > now ? (nextValidationAt - now) / 1000F : 1F;
             schedulePendingValidation(server, participant.getPlayerUuid(), participant.getPreparedLevel(), delaySeconds);
         }
+        handleCheckInRecovery(server);
     }
 
     public static void shutdown(MinecraftServer server) {
@@ -259,6 +328,7 @@ public final class TournamentStateService {
         if (scheduledTasks != null) {
             scheduledTasks.values().forEach(ScheduledTask::expire);
         }
+        cancelCheckInTasks(server);
         STATE_CACHE.remove(server);
         CONFIG_CACHE.remove(server);
     }
@@ -389,6 +459,10 @@ public final class TournamentStateService {
             record.setRollsUsed(0);
         }
 
+        if (isCheckInOpen(state)) {
+            record.setCheckInStatus(TournamentCheckInStatus.AWAITING);
+        }
+
         state.getParticipants().add(record);
         saveState(server);
 
@@ -396,6 +470,7 @@ public final class TournamentStateService {
     }
 
     private static String chooseElementForNewParticipant(TournamentState state) {
+        boolean isSingleType = "singletype".equals(TournamentModeRegistry.resolve(state.getTournamentType()).id());
         Map<String, Integer> counts = new HashMap<>();
         for (String element : ELEMENTS) {
             counts.put(element, 0);
@@ -405,6 +480,20 @@ public final class TournamentStateService {
             if (element != null && counts.containsKey(element)) {
                 counts.put(element, counts.get(element) + 1);
             }
+        }
+
+        if (isSingleType) {
+            List<String> candidates = new ArrayList<>();
+            for (String element : ELEMENTS) {
+                if (counts.get(element) == 0) {
+                    candidates.add(element);
+                }
+            }
+            if (candidates.isEmpty()) {
+                throw new IllegalStateException("Nao ha mais tipos disponiveis para este campeonato. Limite de 13 participantes atingido.");
+            }
+            int index = (int) (Math.random() * candidates.size());
+            return candidates.get(index);
         }
 
         int min = counts.values().stream().min(Integer::compare).orElse(0);
@@ -454,27 +543,38 @@ public final class TournamentStateService {
             }
         }
 
-        int min = counts.values().stream().min(Integer::compare).orElse(0);
-        
+        boolean isSingleType = "singletype".equals(TournamentModeRegistry.resolve(state.getTournamentType()).id());
         List<String> candidates = new ArrayList<>();
-        for (Map.Entry<String, Integer> entry : counts.entrySet()) {
-            if (entry.getValue() == min && !isSameElement(entry.getKey(), oldElement)) {
-                candidates.add(entry.getKey());
+        if (isSingleType) {
+            for (String element : ELEMENTS) {
+                if (counts.get(element) == 0 && !isSameElement(element, oldElement)) {
+                    candidates.add(element);
+                }
             }
-        }
-
-        if (candidates.isEmpty()) {
+            if (candidates.isEmpty()) {
+                throw new IllegalStateException("Nao ha outros tipos disponiveis para sortear.");
+            }
+        } else {
+            int min = counts.values().stream().min(Integer::compare).orElse(0);
             for (Map.Entry<String, Integer> entry : counts.entrySet()) {
-                if (entry.getValue() == min + 1 && !isSameElement(entry.getKey(), oldElement)) {
+                if (entry.getValue() == min && !isSameElement(entry.getKey(), oldElement)) {
                     candidates.add(entry.getKey());
                 }
             }
-        }
 
-        if (candidates.isEmpty()) {
-            for (String element : ELEMENTS) {
-                if (!isSameElement(element, oldElement)) {
-                    candidates.add(element);
+            if (candidates.isEmpty()) {
+                for (Map.Entry<String, Integer> entry : counts.entrySet()) {
+                    if (entry.getValue() == min + 1 && !isSameElement(entry.getKey(), oldElement)) {
+                        candidates.add(entry.getKey());
+                    }
+                }
+            }
+
+            if (candidates.isEmpty()) {
+                for (String element : ELEMENTS) {
+                    if (!isSameElement(element, oldElement)) {
+                        candidates.add(element);
+                    }
                 }
             }
         }
@@ -490,5 +590,185 @@ public final class TournamentStateService {
         saveState(server);
 
         return newElement;
+    }
+
+    private static final Map<MinecraftServer, List<ScheduledTask>> CHECK_IN_TASKS = new HashMap<>();
+
+    public static void cancelCheckInTasks(MinecraftServer server) {
+        List<ScheduledTask> tasks = CHECK_IN_TASKS.remove(server);
+        if (tasks != null) {
+            for (ScheduledTask task : tasks) {
+                task.expire();
+            }
+        }
+    }
+
+    public static void scheduleCheckInTasks(MinecraftServer server, long deadlineMs) {
+        cancelCheckInTasks(server);
+        List<ScheduledTask> tasks = new ArrayList<>();
+        CHECK_IN_TASKS.put(server, tasks);
+
+        long now = System.currentTimeMillis();
+        long totalRemainingSec = (deadlineMs - now) / 1000L;
+
+        if (totalRemainingSec > 180) {
+            long delay = totalRemainingSec - 180;
+            ScheduledTask task = ServerRealTimeTaskTracker.INSTANCE.after(delay, () -> {
+                broadcastCountdown(server, 3, true);
+                return Unit.INSTANCE;
+            });
+            tasks.add(task);
+        }
+        if (totalRemainingSec > 60) {
+            long delay = totalRemainingSec - 60;
+            ScheduledTask task = ServerRealTimeTaskTracker.INSTANCE.after(delay, () -> {
+                broadcastCountdown(server, 1, true);
+                return Unit.INSTANCE;
+            });
+            tasks.add(task);
+        }
+        if (totalRemainingSec > 30) {
+            long delay = totalRemainingSec - 30;
+            ScheduledTask task = ServerRealTimeTaskTracker.INSTANCE.after(delay, () -> {
+                broadcastCountdown(server, 30, false);
+                return Unit.INSTANCE;
+            });
+            tasks.add(task);
+        }
+        if (totalRemainingSec > 10) {
+            long delay = totalRemainingSec - 10;
+            ScheduledTask task = ServerRealTimeTaskTracker.INSTANCE.after(delay, () -> {
+                broadcastCountdown(server, 10, false);
+                return Unit.INSTANCE;
+            });
+            tasks.add(task);
+        }
+
+        long finalDelay = Math.max(1, totalRemainingSec);
+        ScheduledTask finalTask = ServerRealTimeTaskTracker.INSTANCE.after(finalDelay, () -> {
+            endCheckIn(server);
+            return Unit.INSTANCE;
+        });
+        tasks.add(finalTask);
+    }
+
+    public static void broadcastCountdown(MinecraftServer server, int value, boolean isMinutes) {
+        TournamentState state = getState(server);
+        if (!"CHECK_IN".equals(state.getTournamentPhase())) {
+            return;
+        }
+
+        List<String> pendingNames = new ArrayList<>();
+        for (TournamentParticipantRecord part : state.getParticipants()) {
+            if (part.getCheckInStatus() == TournamentCheckInStatus.AWAITING || part.getCheckInStatus() == TournamentCheckInStatus.NOT_STARTED) {
+                pendingNames.add(part.getPlayerName());
+            }
+        }
+
+        if (pendingNames.isEmpty()) {
+            return;
+        }
+
+        String pendingListStr = pendingNames.stream().map(name -> "- " + name).collect(java.util.stream.Collectors.joining("\n"));
+
+        net.minecraft.network.chat.Component countdownComponent;
+        if (isMinutes) {
+            if (value == 1) {
+                countdownComponent = TournamentMessages.translatable("commands.tournament.checkin.countdown.minute", pendingListStr);
+            } else {
+                countdownComponent = TournamentMessages.translatable("commands.tournament.checkin.countdown.minutes", value, pendingListStr);
+            }
+        } else {
+            countdownComponent = TournamentMessages.translatable("commands.tournament.checkin.countdown.seconds", value, pendingListStr);
+        }
+
+        server.getPlayerList().broadcastSystemMessage(countdownComponent, false);
+    }
+
+    public static void endCheckIn(MinecraftServer server) {
+        TournamentState state = getState(server);
+        if (!"CHECK_IN".equals(state.getTournamentPhase())) {
+            return;
+        }
+
+        state.setTournamentPhase("READY");
+
+        List<TournamentParticipantRecord> present = new ArrayList<>();
+        List<TournamentParticipantRecord> absent = new ArrayList<>();
+
+        for (TournamentParticipantRecord part : state.getParticipants()) {
+            if (part.getCheckInStatus() == TournamentCheckInStatus.CHECKED_IN) {
+                present.add(part);
+            } else if (part.getCheckInStatus() == TournamentCheckInStatus.AWAITING || part.getCheckInStatus() == TournamentCheckInStatus.NOT_STARTED) {
+                part.setCheckInStatus(TournamentCheckInStatus.ABSENT);
+                absent.add(part);
+            } else if (part.getCheckInStatus() == TournamentCheckInStatus.ABSENT) {
+                absent.add(part);
+            } else {
+                part.setCheckInStatus(TournamentCheckInStatus.CHECKED_IN);
+                present.add(part);
+            }
+        }
+
+        cancelCheckInTasks(server);
+        saveState(server);
+
+        boolean isSingleType = "singletype".equals(TournamentModeRegistry.resolve(state.getTournamentType()).id());
+
+        net.minecraft.network.chat.MutableComponent message = (net.minecraft.network.chat.MutableComponent) TournamentMessages.translatable("commands.tournament.checkin.ended.header");
+
+        for (TournamentParticipantRecord p : present) {
+            if (isSingleType) {
+                message.append("\n").append(net.minecraft.network.chat.Component.translatable("commands.tournament.checkin.ended.present.singletype", p.getPlayerName(), p.getAssignedElement()));
+            } else {
+                message.append("\n").append(net.minecraft.network.chat.Component.translatable("commands.tournament.checkin.ended.present.standard", p.getPlayerName()));
+            }
+        }
+
+        message.append(net.minecraft.network.chat.Component.translatable("commands.tournament.checkin.ended.absent_header"));
+
+        for (TournamentParticipantRecord a : absent) {
+            message.append("\n").append(net.minecraft.network.chat.Component.translatable("commands.tournament.checkin.ended.absent.item", a.getPlayerName()));
+        }
+
+        message.append(net.minecraft.network.chat.Component.translatable("commands.tournament.checkin.ended.footer"));
+
+        server.getPlayerList().broadcastSystemMessage(message, false);
+    }
+
+    public static void checkIfAllCheckedIn(MinecraftServer server) {
+        TournamentState state = getState(server);
+        if (!"CHECK_IN".equals(state.getTournamentPhase())) {
+            return;
+        }
+        boolean allConfirmed = true;
+        for (TournamentParticipantRecord part : state.getParticipants()) {
+            if (part.getCheckInStatus() == TournamentCheckInStatus.AWAITING || part.getCheckInStatus() == TournamentCheckInStatus.NOT_STARTED) {
+                allConfirmed = false;
+                break;
+            }
+        }
+
+        if (allConfirmed) {
+            cancelCheckInTasks(server);
+            state.setTournamentPhase("READY");
+            saveState(server);
+
+            server.getPlayerList().broadcastSystemMessage(TournamentMessages.translatable("commands.tournament.checkin.all_confirmed"), false);
+        }
+    }
+
+    public static void handleCheckInRecovery(MinecraftServer server) {
+        TournamentState state = getState(server);
+        if (!"CHECK_IN".equals(state.getTournamentPhase())) {
+            return;
+        }
+        long now = System.currentTimeMillis();
+        long deadline = state.getCheckInDeadline();
+        if (deadline <= now) {
+            endCheckIn(server);
+        } else {
+            scheduleCheckInTasks(server, deadline);
+        }
     }
 }

@@ -2,8 +2,12 @@ package com.bigbang_tournaments.service;
 
 import com.bigbang_tournaments.model.PokemonMoveSnapshot;
 import com.bigbang_tournaments.model.PokemonSnapshot;
+import com.bigbang_tournaments.model.TournamentConfig;
+import com.bigbang_tournaments.model.TournamentParticipantRecord;
 import com.bigbang_tournaments.model.TournamentRuleViolation;
 import com.bigbang_tournaments.model.TournamentSnapshot;
+import com.bigbang_tournaments.model.TournamentTeamValidationResult;
+import com.bigbang_tournaments.model.TournamentState;
 import com.bigbang_tournaments.storage.SnapshotStorage;
 import com.cobblemon.mod.common.Cobblemon;
 import com.cobblemon.mod.common.api.moves.BenchedMove;
@@ -155,6 +159,14 @@ public final class PokemonTeamService {
             return new PrepareResult(PrepareResult.Status.EMPTY_PARTY, null);
         }
 
+        TournamentConfig config = TournamentStateService.getConfig(server);
+        TournamentState state = TournamentStateService.getState(server);
+        TournamentTeamValidationResult validationResult = TournamentRulesValidator.analyzePlayer(player, targetLevel, config, null, true);
+        if (!validationResult.isValid()) {
+            LOGGER.warn("Preparation rejected for {} because the team is not valid", player.getGameProfile().getName());
+            return new PrepareResult(PrepareResult.Status.ERROR, null);
+        }
+
         TournamentSnapshot snapshot = captureCurrentPartySnapshot(player, targetLevel, true);
         try {
             SnapshotStorage.saveSnapshot(server, snapshot);
@@ -163,11 +175,28 @@ public final class PokemonTeamService {
             return new PrepareResult(PrepareResult.Status.ERROR, null);
         }
 
-        applyLevelToParty(partyPokemon, targetLevel);
-        party.heal();
+        try {
+            applyLevelToParty(partyPokemon, targetLevel);
+            party.heal();
 
-        LOGGER.info("Prepared team for player {} to level {}", player.getGameProfile().getName(), targetLevel);
-        return new PrepareResult(PrepareResult.Status.SUCCESS, snapshot);
+            TournamentParticipantRecord participantRecord = TournamentStateService.getParticipant(server, player.getUUID()).orElse(null);
+            if (participantRecord != null) {
+                TournamentStateService.applyTeamComposition(
+                        server,
+                        player.getUUID(),
+                        validationResult.getCompositionMode(),
+                        validationResult.getJokerPokemonUuid(),
+                        validationResult.getJokerSpeciesName()
+                );
+            }
+
+            LOGGER.info("Prepared team for player {} to level {}", player.getGameProfile().getName(), targetLevel);
+            return new PrepareResult(PrepareResult.Status.SUCCESS, snapshot);
+        } catch (Exception e) {
+            LOGGER.error("Failed to prepare team for {}", player.getGameProfile().getName(), e);
+            SnapshotStorage.deleteSnapshot(server, player.getUUID());
+            return new PrepareResult(PrepareResult.Status.ERROR, null);
+        }
     }
 
     public static RestoreResult restoreTeam(ServerPlayer player) {

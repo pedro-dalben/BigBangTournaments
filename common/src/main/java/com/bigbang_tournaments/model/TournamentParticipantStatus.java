@@ -5,5 +5,8 @@ public enum TournamentParticipantStatus {
     PENDING_VALIDATION,
     PREPARED,
     UNLOCKED,
-    RESTORED
+    RESTORED,
+    AWAITING_CHECK_IN,
+    CHECKED_IN,
+    ABSENT
 }

@@ -62,4 +62,49 @@ public final class TournamentEventsHandler {
             }
         }
     }
+
+    @SubscribeEvent
+    public static void onPlayerLoggedIn(net.neoforged.neoforge.event.entity.player.PlayerEvent.PlayerLoggedInEvent event) {
+        if (!(event.getEntity() instanceof ServerPlayer player)) {
+            return;
+        }
+        net.minecraft.server.MinecraftServer server = player.getServer();
+        if (server == null) {
+            return;
+        }
+
+        com.bigbang_tournaments.model.TournamentState state = TournamentStateService.getState(server);
+        if ("CHECK_IN".equals(state.getTournamentPhase())) {
+            java.util.Optional<com.bigbang_tournaments.model.TournamentParticipantRecord> recordOpt =
+                    TournamentStateService.getParticipant(server, player.getUUID());
+            if (recordOpt.isPresent()) {
+                com.bigbang_tournaments.model.TournamentParticipantRecord record = recordOpt.get();
+                if (record.getCheckInStatus() == com.bigbang_tournaments.model.TournamentCheckInStatus.AWAITING ||
+                    record.getCheckInStatus() == com.bigbang_tournaments.model.TournamentCheckInStatus.NOT_STARTED) {
+                    
+                    long timeLeft = state.getCheckInDeadline() - System.currentTimeMillis();
+                    if (timeLeft > 0) {
+                        long min = timeLeft / 60000L;
+                        long sec = (timeLeft % 60000L) / 1000L;
+                        
+                        net.minecraft.network.chat.Component timeComponent;
+                        if (min > 0) {
+                            if (min == 1) {
+                                timeComponent = net.minecraft.network.chat.Component.translatable("time.minute_and_seconds", min, sec);
+                            } else {
+                                timeComponent = net.minecraft.network.chat.Component.translatable("time.minutes_and_seconds", min, sec);
+                            }
+                        } else {
+                            timeComponent = net.minecraft.network.chat.Component.translatable("time.seconds", sec);
+                        }
+
+                        net.minecraft.network.chat.Component alertComponent = 
+                            net.minecraft.network.chat.Component.translatable("commands.tournament.checkin.login_alert", timeComponent);
+                        
+                        player.sendSystemMessage(alertComponent);
+                    }
+                }
+            }
+        }
+    }
 }

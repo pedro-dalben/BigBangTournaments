@@ -19,6 +19,10 @@ public final class TournamentMessages {
         return Component.literal(PREFIX + message);
     }
 
+    public static Component translatable(String key, Object... args) {
+        return Component.literal(PREFIX).append(Component.translatable(key, args));
+    }
+
     public static void broadcast(MinecraftServer server, String message) {
         server.getPlayerList().broadcastSystemMessage(text(message), false);
     }

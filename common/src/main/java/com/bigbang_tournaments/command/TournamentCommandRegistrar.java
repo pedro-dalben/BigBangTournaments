@@ -3,11 +3,14 @@ package com.bigbang_tournaments.command;
 import com.bigbang_tournaments.model.TournamentParticipantRecord;
 import com.bigbang_tournaments.model.TournamentRuleViolation;
 import com.bigbang_tournaments.model.TournamentConfig;
+import com.bigbang_tournaments.model.TournamentCheckInStatus;
+import com.bigbang_tournaments.model.TournamentMode;
 import com.bigbang_tournaments.service.PokemonTeamService;
 import com.bigbang_tournaments.service.TournamentPokemonBanHelper;
 import com.bigbang_tournaments.service.TournamentBattleService;
 import com.bigbang_tournaments.service.TournamentRulesValidator;
 import com.bigbang_tournaments.service.TournamentStateService;
+import com.bigbang_tournaments.service.TournamentModeRegistry;
 import com.bigbang_tournaments.storage.SnapshotStorage;
 import com.bigbang_tournaments.util.TournamentMessages;
 import com.bigbang_tournaments.util.PermissionHelper;
@@ -109,6 +112,19 @@ public final class TournamentCommandRegistrar {
                                 .executes(context -> TournamentBattleService.registerManualWin(
                                         context.getSource(),
                                         EntityArgument.getPlayer(context, "player")))))
+                .then(Commands.literal("start")
+                        .requires(source -> source.hasPermission(TournamentStateService.getAdminPermissionLevel(source.getServer())))
+                        .then(Commands.argument("type", StringArgumentType.word())
+                                .suggests((context, builder) -> {
+                                    builder.suggest("standard");
+                                    builder.suggest("singletype");
+                                    return builder.buildFuture();
+                                })
+                                .executes(context -> executeStartTournament(
+                                        context.getSource(),
+                                        StringArgumentType.getString(context, "type")))))
+                .then(Commands.literal("entrar")
+                        .executes(context -> executeEntrar(context.getSource())))
                 .then(Commands.literal("spectate")
                         .executes(context -> executeSpectate(context.getSource())))
                 .then(Commands.literal("healall")
@@ -381,8 +397,20 @@ public final class TournamentCommandRegistrar {
     }
 
     private static int executeParticipantAdd(CommandSourceStack source, GameProfile profile) {
-        TournamentStateService.upsertParticipant(source.getServer(), profile);
-        TournamentMessages.sendSuccess(source, profile.getName() + " adicionado a lista de participantes.", true);
+        MinecraftServer server = source.getServer();
+        com.bigbang_tournaments.model.TournamentState state = TournamentStateService.getState(server);
+        TournamentStateService.upsertParticipant(server, profile);
+
+        if ("CHECK_IN".equals(state.getTournamentPhase())) {
+            TournamentStateService.markCheckInAwaiting(server, profile.getId());
+            server.getPlayerList().broadcastSystemMessage(TournamentMessages.translatable("commands.tournament.participant.add.during_checkin", profile.getName()), false);
+        } else if ("READY".equals(state.getTournamentPhase())) {
+            TournamentStateService.markCheckInConfirmed(server, profile.getId());
+            server.getPlayerList().broadcastSystemMessage(TournamentMessages.translatable("commands.tournament.participant.add.after_checkin", profile.getName()), false);
+        } else {
+            TournamentStateService.resetCheckInState(server, profile.getId());
+            TournamentMessages.sendSuccess(source, profile.getName() + " adicionado a lista de participantes.", true);
+        }
         return 1;
     }
 
@@ -397,14 +425,54 @@ public final class TournamentCommandRegistrar {
     }
 
     private static int executeParticipantList(CommandSourceStack source) {
-        List<TournamentParticipantRecord> participants = TournamentStateService.listParticipants(source.getServer());
+        MinecraftServer server = source.getServer();
+        com.bigbang_tournaments.model.TournamentState state = TournamentStateService.getState(server);
+        List<TournamentParticipantRecord> participants = TournamentStateService.listParticipants(server);
         if (participants.isEmpty()) {
             TournamentMessages.sendFailure(source, "Nao ha participantes registrados.");
             return 0;
         }
+
+        boolean isSingleType = "singletype".equals(TournamentModeRegistry.resolve(state.getTournamentType()).id());
         TournamentMessages.sendSuccess(source, "Participantes registrados: " + participants.size(), false);
+
         for (TournamentParticipantRecord participant : participants) {
-            source.sendSuccess(() -> Component.literal("- " + participant.getPlayerName() + " [" + participant.getStatus() + "]"), false);
+            String presenceKey;
+            switch (participant.getCheckInStatus()) {
+                case CHECKED_IN:
+                    presenceKey = "commands.tournament.presence.present";
+                    break;
+                case ABSENT:
+                    presenceKey = "commands.tournament.presence.absent";
+                    break;
+                case AWAITING:
+                case NOT_STARTED:
+                default:
+                    presenceKey = "commands.tournament.presence.awaiting";
+                    break;
+            }
+            Component presenceComp = Component.translatable(presenceKey);
+
+            String prepKey;
+            if (participant.isPrepared()) {
+                prepKey = "commands.tournament.prep.prepared";
+            } else if (participant.isPendingValidation()) {
+                prepKey = "commands.tournament.prep.pending";
+            } else {
+                prepKey = "commands.tournament.prep.not_prepared";
+            }
+            Component prepComp = Component.translatable(prepKey);
+
+            Component itemComponent;
+            if (isSingleType) {
+                String element = participant.getAssignedElement() != null ? participant.getAssignedElement() : "N/A";
+                itemComponent = Component.translatable("commands.tournament.participant.list.item.singletype",
+                        participant.getPlayerName(), element, presenceComp, prepComp);
+            } else {
+                itemComponent = Component.translatable("commands.tournament.participant.list.item.standard",
+                        participant.getPlayerName(), presenceComp, prepComp);
+            }
+            source.sendSuccess(() -> itemComponent, false);
         }
         return participants.size();
     }
@@ -649,6 +717,144 @@ public final class TournamentCommandRegistrar {
             return 0;
         } catch (Exception e) {
             TournamentMessages.sendFailure(source, "Erro ao sortear novamente: " + e.getMessage());
+            return 0;
+        }
+    }
+
+    private static int executeStartTournament(CommandSourceStack source, String typeInput) {
+        try {
+            MinecraftServer server = source.getServer();
+            com.bigbang_tournaments.model.TournamentState state = TournamentStateService.getState(server);
+
+            if (state.getTournamentName() == null || state.getTournamentName().trim().isEmpty()) {
+                TournamentMessages.sendFailure(source, "Não foi possível iniciar o campeonato.\nNão existe campeonato agendado no momento.");
+                return 0;
+            }
+
+            if (!TournamentModeRegistry.isValidType(typeInput)) {
+                TournamentMessages.sendFailure(source, "Tipo de campeonato desconhecido: " + typeInput + ".");
+                return 0;
+            }
+
+            com.bigbang_tournaments.model.TournamentMode mode = TournamentModeRegistry.resolve(typeInput);
+            String canonicalType = mode.id();
+
+            if ("CHECK_IN".equals(state.getTournamentPhase())) {
+                TournamentMessages.sendFailure(source, "A chamada para o campeonato ja esta ativa.");
+                return 0;
+            }
+
+            if (state.getParticipants().isEmpty()) {
+                TournamentMessages.sendFailure(source, "Não foi possível iniciar o campeonato.\nNão existem participantes inscritos.");
+                return 0;
+            }
+
+            state.setTournamentType(canonicalType);
+            state.setTournamentPhase("CHECK_IN");
+
+            long now = System.currentTimeMillis();
+            long durationMs = 5 * 60 * 1000L;
+            long deadline = now + durationMs;
+            state.setCheckInStartedAt(now);
+            state.setCheckInDeadline(deadline);
+
+            for (TournamentParticipantRecord part : state.getParticipants()) {
+                part.setCheckInStatus(TournamentCheckInStatus.AWAITING);
+                part.setCheckedInAt(0L);
+            }
+
+            TournamentStateService.saveState(server);
+
+            Component announcement = TournamentMessages.translatable("commands.tournament.start.announcement", mode.displayName(), state.getParticipants().size());
+            server.getPlayerList().broadcastSystemMessage(announcement, false);
+
+            for (TournamentParticipantRecord part : state.getParticipants()) {
+                boolean isOnline = server.getPlayerList().getPlayer(part.getPlayerUuid()) != null;
+                Component statusComponent = Component.translatable(isOnline ? "commands.tournament.status.online" : "commands.tournament.status.offline");
+
+                Component pLine;
+                if ("singletype".equals(canonicalType)) {
+                    String element = part.getAssignedElement() != null ? part.getAssignedElement() : "N/A";
+                    pLine = Component.translatable("commands.tournament.start.participant.singletype", part.getPlayerName(), element, statusComponent);
+                } else {
+                    pLine = Component.translatable("commands.tournament.start.participant.standard", part.getPlayerName(), statusComponent);
+                }
+                server.getPlayerList().broadcastSystemMessage(pLine, false);
+            }
+
+            List<String> offlineNames = new ArrayList<>();
+            for (TournamentParticipantRecord part : state.getParticipants()) {
+                if (server.getPlayerList().getPlayer(part.getPlayerUuid()) == null) {
+                    offlineNames.add(part.getPlayerName());
+                }
+            }
+            if (!offlineNames.isEmpty()) {
+                String offlineListStr = offlineNames.stream().map(name -> "- " + name).collect(java.util.stream.Collectors.joining("\n"));
+                Component offlineWarning = TournamentMessages.translatable("commands.tournament.start.offline_warning", offlineListStr);
+                server.getPlayerList().broadcastSystemMessage(offlineWarning, false);
+            }
+
+            TournamentStateService.scheduleCheckInTasks(server, deadline);
+
+            return 1;
+        } catch (Exception e) {
+            TournamentMessages.sendFailure(source, "Erro ao iniciar campeonato: " + e.getMessage());
+            return 0;
+        }
+    }
+
+    private static int executeEntrar(CommandSourceStack source) {
+        try {
+            if (!(source.getEntity() instanceof ServerPlayer player)) {
+                TournamentMessages.sendFailure(source, "Apenas jogadores podem utilizar este comando.");
+                return 0;
+            }
+
+            MinecraftServer server = source.getServer();
+            com.bigbang_tournaments.model.TournamentState state = TournamentStateService.getState(server);
+
+            if (!"CHECK_IN".equals(state.getTournamentPhase())) {
+                player.sendSystemMessage(TournamentMessages.translatable("commands.tournament.entrar.no_checkin"));
+                return 0;
+            }
+
+            if (System.currentTimeMillis() > state.getCheckInDeadline()) {
+                player.sendSystemMessage(TournamentMessages.translatable("commands.tournament.entrar.closed"));
+                TournamentStateService.endCheckIn(server);
+                return 0;
+            }
+
+            java.util.Optional<TournamentParticipantRecord> recordOpt = TournamentStateService.getParticipant(server, player.getUUID());
+            if (recordOpt.isEmpty()) {
+                player.sendSystemMessage(TournamentMessages.translatable("commands.tournament.entrar.not_registered"));
+                return 0;
+            }
+
+            TournamentParticipantRecord record = recordOpt.get();
+
+            if (record.getCheckInStatus() == TournamentCheckInStatus.CHECKED_IN) {
+                player.sendSystemMessage(TournamentMessages.translatable("commands.tournament.entrar.already_confirmed"));
+                return 0;
+            }
+
+            record.setCheckInStatus(TournamentCheckInStatus.CHECKED_IN);
+            record.setCheckedInAt(System.currentTimeMillis());
+            TournamentStateService.saveState(server);
+
+            server.getPlayerList().broadcastSystemMessage(
+                    TournamentMessages.translatable("commands.tournament.entrar.confirmed.broadcast", player.getGameProfile().getName()),
+                    false
+            );
+
+            player.sendSystemMessage(
+                    TournamentMessages.translatable("commands.tournament.entrar.confirmed.target")
+            );
+
+            TournamentStateService.checkIfAllCheckedIn(server);
+
+            return 1;
+        } catch (Exception e) {
+            TournamentMessages.sendFailure(source, "Erro ao confirmar presenca: " + e.getMessage());
             return 0;
         }
     }

@@ -8,6 +8,8 @@ public class TournamentParticipantRecord {
     private UUID playerUuid;
     private String playerName;
     private TournamentParticipantStatus status = TournamentParticipantStatus.REGISTERED;
+    private TournamentCheckInStatus checkInStatus = TournamentCheckInStatus.NOT_STARTED;
+    private long checkedInAt;
     private int preparedLevel;
     private boolean prepared;
     private boolean rosterLocked;
@@ -51,6 +53,22 @@ public class TournamentParticipantRecord {
 
     public void setStatus(TournamentParticipantStatus status) {
         this.status = status;
+    }
+
+    public TournamentCheckInStatus getCheckInStatus() {
+        return checkInStatus;
+    }
+
+    public void setCheckInStatus(TournamentCheckInStatus checkInStatus) {
+        this.checkInStatus = checkInStatus;
+    }
+
+    public long getCheckedInAt() {
+        return checkedInAt;
+    }
+
+    public void setCheckedInAt(long checkedInAt) {
+        this.checkedInAt = checkedInAt;
     }
 
     public int getPreparedLevel() {
@@ -127,6 +145,9 @@ public class TournamentParticipantRecord {
 
     private String assignedElement;
     private int rollsUsed;
+    private String teamCompositionMode;
+    private UUID jokerPokemonUuid;
+    private String jokerSpeciesName;
 
     public String getAssignedElement() {
         return assignedElement;
@@ -142,5 +163,29 @@ public class TournamentParticipantRecord {
 
     public void setRollsUsed(int rollsUsed) {
         this.rollsUsed = rollsUsed;
+    }
+
+    public String getTeamCompositionMode() {
+        return teamCompositionMode;
+    }
+
+    public void setTeamCompositionMode(String teamCompositionMode) {
+        this.teamCompositionMode = teamCompositionMode;
+    }
+
+    public UUID getJokerPokemonUuid() {
+        return jokerPokemonUuid;
+    }
+
+    public void setJokerPokemonUuid(UUID jokerPokemonUuid) {
+        this.jokerPokemonUuid = jokerPokemonUuid;
+    }
+
+    public String getJokerSpeciesName() {
+        return jokerSpeciesName;
+    }
+
+    public void setJokerSpeciesName(String jokerSpeciesName) {
+        this.jokerSpeciesName = jokerSpeciesName;
     }
 }
