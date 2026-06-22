@@ -1,16 +1,25 @@
 package com.bigbang_tournaments.util;
 
+import com.google.gson.JsonObject;
+import com.google.gson.JsonParser;
 import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.network.chat.Component;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerPlayer;
 import org.slf4j.Logger;
 
+import java.io.InputStream;
+import java.io.InputStreamReader;
+import java.nio.charset.StandardCharsets;
+import java.util.LinkedHashMap;
+import java.util.Locale;
+import java.util.Map;
 import java.util.List;
 import java.util.stream.Collectors;
 
 public final class TournamentMessages {
     public static final String PREFIX = "[CAMPEONATO] ";
+    private static final Map<String, String> LANGUAGE = loadLanguage();
 
     private TournamentMessages() {
     }
@@ -20,7 +29,25 @@ public final class TournamentMessages {
     }
 
     public static Component translatable(String key, Object... args) {
-        return Component.literal(PREFIX).append(Component.translatable(key, args));
+        return Component.literal(PREFIX + resolve(key, args));
+    }
+
+    public static Component plain(String key, Object... args) {
+        return Component.literal(resolve(key, args));
+    }
+
+    public static String resolve(String key, Object... args) {
+        String pattern = LANGUAGE.getOrDefault(key, key);
+        Object[] resolvedArgs = new Object[args.length];
+        for (int i = 0; i < args.length; i++) {
+            Object arg = args[i];
+            if (arg instanceof Component component) {
+                resolvedArgs[i] = component.getString();
+            } else {
+                resolvedArgs[i] = arg;
+            }
+        }
+        return String.format(Locale.ROOT, pattern, resolvedArgs);
     }
 
     public static void broadcast(MinecraftServer server, String message) {
@@ -109,5 +136,31 @@ public final class TournamentMessages {
 
     public static List<String> toReasonMessages(List<?> violations) {
         return violations.stream().map(Object::toString).collect(Collectors.toList());
+    }
+
+    private static Map<String, String> loadLanguage() {
+        Map<String, String> language = new LinkedHashMap<>();
+        loadLanguageFile(language, "assets/bigbang_tournaments/lang/en_us.json");
+        loadLanguageFile(language, "assets/bigbang_tournaments/lang/pt_br.json");
+        return Map.copyOf(language);
+    }
+
+    private static void loadLanguageFile(Map<String, String> target, String resourcePath) {
+        ClassLoader classLoader = TournamentMessages.class.getClassLoader();
+        try (InputStream inputStream = classLoader.getResourceAsStream(resourcePath)) {
+            if (inputStream == null) {
+                return;
+            }
+
+            JsonObject jsonObject = JsonParser.parseReader(new InputStreamReader(inputStream, StandardCharsets.UTF_8))
+                    .getAsJsonObject();
+            for (Map.Entry<String, com.google.gson.JsonElement> entry : jsonObject.entrySet()) {
+                if (entry.getValue().isJsonPrimitive()) {
+                    target.put(entry.getKey(), entry.getValue().getAsString());
+                }
+            }
+        } catch (Exception ignored) {
+            // If the bundled lang file is unavailable, fall back to raw keys.
+        }
     }
 }

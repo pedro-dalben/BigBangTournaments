@@ -161,9 +161,13 @@ public final class PokemonTeamService {
 
         TournamentConfig config = TournamentStateService.getConfig(server);
         TournamentState state = TournamentStateService.getState(server);
-        TournamentTeamValidationResult validationResult = TournamentRulesValidator.analyzePlayer(player, targetLevel, config, null, true);
+        TournamentTeamValidationResult validationResult = TournamentRulesValidator.analyzePlayer(player, targetLevel, config, null, false);
         if (!validationResult.isValid()) {
-            LOGGER.warn("Preparation rejected for {} because the team is not valid", player.getGameProfile().getName());
+            LOGGER.warn(
+                    "Preparation rejected for {} because the team is not valid: {}",
+                    player.getGameProfile().getName(),
+                    String.join(" | ", TournamentRulesValidator.toReasonList(validationResult.getViolations()))
+            );
             return new PrepareResult(PrepareResult.Status.ERROR, null);
         }
 

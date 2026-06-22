@@ -451,7 +451,7 @@ public final class TournamentCommandRegistrar {
                     presenceKey = "commands.tournament.presence.awaiting";
                     break;
             }
-            Component presenceComp = Component.translatable(presenceKey);
+            Component presenceComp = TournamentMessages.plain(presenceKey);
 
             String prepKey;
             if (participant.isPrepared()) {
@@ -461,15 +461,15 @@ public final class TournamentCommandRegistrar {
             } else {
                 prepKey = "commands.tournament.prep.not_prepared";
             }
-            Component prepComp = Component.translatable(prepKey);
+            Component prepComp = TournamentMessages.plain(prepKey);
 
             Component itemComponent;
             if (isSingleType) {
                 String element = participant.getAssignedElement() != null ? participant.getAssignedElement() : "N/A";
-                itemComponent = Component.translatable("commands.tournament.participant.list.item.singletype",
+                itemComponent = TournamentMessages.plain("commands.tournament.participant.list.item.singletype",
                         participant.getPlayerName(), element, presenceComp, prepComp);
             } else {
-                itemComponent = Component.translatable("commands.tournament.participant.list.item.standard",
+                itemComponent = TournamentMessages.plain("commands.tournament.participant.list.item.standard",
                         participant.getPlayerName(), presenceComp, prepComp);
             }
             source.sendSuccess(() -> itemComponent, false);
@@ -770,14 +770,14 @@ public final class TournamentCommandRegistrar {
 
             for (TournamentParticipantRecord part : state.getParticipants()) {
                 boolean isOnline = server.getPlayerList().getPlayer(part.getPlayerUuid()) != null;
-                Component statusComponent = Component.translatable(isOnline ? "commands.tournament.status.online" : "commands.tournament.status.offline");
+                Component statusComponent = TournamentMessages.plain(isOnline ? "commands.tournament.status.online" : "commands.tournament.status.offline");
 
                 Component pLine;
                 if ("singletype".equals(canonicalType)) {
                     String element = part.getAssignedElement() != null ? part.getAssignedElement() : "N/A";
-                    pLine = Component.translatable("commands.tournament.start.participant.singletype", part.getPlayerName(), element, statusComponent);
+                    pLine = TournamentMessages.plain("commands.tournament.start.participant.singletype", part.getPlayerName(), element, statusComponent);
                 } else {
-                    pLine = Component.translatable("commands.tournament.start.participant.standard", part.getPlayerName(), statusComponent);
+                    pLine = TournamentMessages.plain("commands.tournament.start.participant.standard", part.getPlayerName(), statusComponent);
                 }
                 server.getPlayerList().broadcastSystemMessage(pLine, false);
             }
@@ -814,26 +814,26 @@ public final class TournamentCommandRegistrar {
             com.bigbang_tournaments.model.TournamentState state = TournamentStateService.getState(server);
 
             if (!"CHECK_IN".equals(state.getTournamentPhase())) {
-                player.sendSystemMessage(TournamentMessages.translatable("commands.tournament.entrar.no_checkin"));
+                player.sendSystemMessage(TournamentMessages.plain("commands.tournament.entrar.no_checkin"));
                 return 0;
             }
 
             if (System.currentTimeMillis() > state.getCheckInDeadline()) {
-                player.sendSystemMessage(TournamentMessages.translatable("commands.tournament.entrar.closed"));
+                player.sendSystemMessage(TournamentMessages.plain("commands.tournament.entrar.closed"));
                 TournamentStateService.endCheckIn(server);
                 return 0;
             }
 
             java.util.Optional<TournamentParticipantRecord> recordOpt = TournamentStateService.getParticipant(server, player.getUUID());
             if (recordOpt.isEmpty()) {
-                player.sendSystemMessage(TournamentMessages.translatable("commands.tournament.entrar.not_registered"));
+                player.sendSystemMessage(TournamentMessages.plain("commands.tournament.entrar.not_registered"));
                 return 0;
             }
 
             TournamentParticipantRecord record = recordOpt.get();
 
             if (record.getCheckInStatus() == TournamentCheckInStatus.CHECKED_IN) {
-                player.sendSystemMessage(TournamentMessages.translatable("commands.tournament.entrar.already_confirmed"));
+                player.sendSystemMessage(TournamentMessages.plain("commands.tournament.entrar.already_confirmed"));
                 return 0;
             }
 
@@ -846,9 +846,7 @@ public final class TournamentCommandRegistrar {
                     false
             );
 
-            player.sendSystemMessage(
-                    TournamentMessages.translatable("commands.tournament.entrar.confirmed.target")
-            );
+            player.sendSystemMessage(TournamentMessages.plain("commands.tournament.entrar.confirmed.target"));
 
             TournamentStateService.checkIfAllCheckedIn(server);
 

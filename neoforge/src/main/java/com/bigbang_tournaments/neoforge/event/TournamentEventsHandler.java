@@ -90,16 +90,16 @@ public final class TournamentEventsHandler {
                         net.minecraft.network.chat.Component timeComponent;
                         if (min > 0) {
                             if (min == 1) {
-                                timeComponent = net.minecraft.network.chat.Component.translatable("time.minute_and_seconds", min, sec);
+                                timeComponent = TournamentMessages.plain("time.minute_and_seconds", min, sec);
                             } else {
-                                timeComponent = net.minecraft.network.chat.Component.translatable("time.minutes_and_seconds", min, sec);
+                                timeComponent = TournamentMessages.plain("time.minutes_and_seconds", min, sec);
                             }
                         } else {
-                            timeComponent = net.minecraft.network.chat.Component.translatable("time.seconds", sec);
+                            timeComponent = TournamentMessages.plain("time.seconds", sec);
                         }
 
-                        net.minecraft.network.chat.Component alertComponent = 
-                            net.minecraft.network.chat.Component.translatable("commands.tournament.checkin.login_alert", timeComponent);
+                        net.minecraft.network.chat.Component alertComponent =
+                            TournamentMessages.translatable("commands.tournament.checkin.login_alert", timeComponent);
                         
                         player.sendSystemMessage(alertComponent);
                     }

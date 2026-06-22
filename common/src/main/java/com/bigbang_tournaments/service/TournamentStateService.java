@@ -715,23 +715,23 @@ public final class TournamentStateService {
 
         boolean isSingleType = "singletype".equals(TournamentModeRegistry.resolve(state.getTournamentType()).id());
 
-        net.minecraft.network.chat.MutableComponent message = (net.minecraft.network.chat.MutableComponent) TournamentMessages.translatable("commands.tournament.checkin.ended.header");
+        net.minecraft.network.chat.MutableComponent message = net.minecraft.network.chat.Component.literal(TournamentMessages.resolve("commands.tournament.checkin.ended.header"));
 
         for (TournamentParticipantRecord p : present) {
             if (isSingleType) {
-                message.append("\n").append(net.minecraft.network.chat.Component.translatable("commands.tournament.checkin.ended.present.singletype", p.getPlayerName(), p.getAssignedElement()));
+                message.append("\n").append(TournamentMessages.plain("commands.tournament.checkin.ended.present.singletype", p.getPlayerName(), p.getAssignedElement()));
             } else {
-                message.append("\n").append(net.minecraft.network.chat.Component.translatable("commands.tournament.checkin.ended.present.standard", p.getPlayerName()));
+                message.append("\n").append(TournamentMessages.plain("commands.tournament.checkin.ended.present.standard", p.getPlayerName()));
             }
         }
 
-        message.append(net.minecraft.network.chat.Component.translatable("commands.tournament.checkin.ended.absent_header"));
+        message.append(TournamentMessages.plain("commands.tournament.checkin.ended.absent_header"));
 
         for (TournamentParticipantRecord a : absent) {
-            message.append("\n").append(net.minecraft.network.chat.Component.translatable("commands.tournament.checkin.ended.absent.item", a.getPlayerName()));
+            message.append("\n").append(TournamentMessages.plain("commands.tournament.checkin.ended.absent.item", a.getPlayerName()));
         }
 
-        message.append(net.minecraft.network.chat.Component.translatable("commands.tournament.checkin.ended.footer"));
+        message.append(TournamentMessages.plain("commands.tournament.checkin.ended.footer"));
 
         server.getPlayerList().broadcastSystemMessage(message, false);
     }
