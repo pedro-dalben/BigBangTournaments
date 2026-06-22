@@ -52,5 +52,7 @@
   "commands.tournament.prep.pending": "Pending validation",
   "commands.tournament.prep.not_prepared": "Not prepared",
   "commands.tournament.participant.list.item.standard": "- %s — %s — %s",
-  "commands.tournament.participant.list.item.singletype": "- %s — %s — %s — %s"
+  "commands.tournament.participant.list.item.singletype": "- %s — %s — %s — %s",
+  "commands.tournament.end.announcement": "\n========================================\n🏆 TOURNAMENT FINISHED\n\nThe tournament '%s' has been finished by the staff!\nThank you to all participants!\n========================================",
+  "commands.tournament.end.announcement.champion": "\n========================================\n🏆 TOURNAMENT FINISHED\n\nThe tournament '%s' has been finished by the staff!\n\n👑 THE GRAND CHAMPION IS: %s! 👑\n\nCongratulations and thank you to all participants!\n========================================"
 }

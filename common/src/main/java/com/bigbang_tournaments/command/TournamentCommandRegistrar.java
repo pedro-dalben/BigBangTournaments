@@ -129,7 +129,23 @@ public final class TournamentCommandRegistrar {
                         .executes(context -> executeSpectate(context.getSource())))
                 .then(Commands.literal("healall")
                         .requires(source -> source.hasPermission(TournamentStateService.getAdminPermissionLevel(source.getServer())))
-                        .executes(context -> executeHealAll(context.getSource()))));
+                        .executes(context -> executeHealAll(context.getSource())))
+                .then(Commands.literal("end")
+                        .requires(source -> source.hasPermission(TournamentStateService.getAdminPermissionLevel(source.getServer())))
+                        .executes(context -> executeEndTournament(context.getSource(), null))
+                        .then(Commands.argument("champion", GameProfileArgument.gameProfile())
+                                .executes(context -> executeEndTournament(context.getSource(), singleProfile(context, "champion")))))
+                .then(Commands.literal("finalizar")
+                        .requires(source -> source.hasPermission(TournamentStateService.getAdminPermissionLevel(source.getServer())))
+                        .executes(context -> executeEndTournament(context.getSource(), null))
+                        .then(Commands.argument("champion", GameProfileArgument.gameProfile())
+                                .executes(context -> executeEndTournament(context.getSource(), singleProfile(context, "champion"))))));
+
+        dispatcher.register(Commands.literal("finalizarcampeonato")
+                .requires(source -> source.hasPermission(TournamentStateService.getAdminPermissionLevel(source.getServer())))
+                .executes(context -> executeEndTournament(context.getSource(), null))
+                .then(Commands.argument("champion", GameProfileArgument.gameProfile())
+                        .executes(context -> executeEndTournament(context.getSource(), singleProfile(context, "champion")))));
 
         dispatcher.register(Commands.literal("assistirbatalha")
                 .executes(context -> executeSpectate(context.getSource())));
@@ -211,7 +227,18 @@ public final class TournamentCommandRegistrar {
                                 .executes(context -> executeParticipantAdd(context.getSource(), singleProfile(context, "player")))))
                 .then(Commands.literal("remove")
                         .then(Commands.argument("player", GameProfileArgument.gameProfile())
-                                .executes(context -> executeParticipantRemove(context.getSource(), singleProfile(context, "player")))))
+                                .executes(context -> executeParticipantRemove(context.getSource(), singleProfile(context, "player"))))
+                        .then(Commands.argument("name", StringArgumentType.word())
+                                .suggests((context, builder) -> {
+                                    try {
+                                        MinecraftServer server = context.getSource().getServer();
+                                        for (TournamentParticipantRecord part : TournamentStateService.listParticipants(server)) {
+                                            builder.suggest(part.getPlayerName());
+                                        }
+                                    } catch (Exception ignored) {}
+                                    return builder.buildFuture();
+                                })
+                                .executes(context -> executeParticipantRemoveByName(context.getSource(), StringArgumentType.getString(context, "name")))))
                 .then(Commands.literal("list")
                         .executes(context -> executeParticipantList(context.getSource())));
     }
@@ -853,6 +880,71 @@ public final class TournamentCommandRegistrar {
             return 1;
         } catch (Exception e) {
             TournamentMessages.sendFailure(source, "Erro ao confirmar presenca: " + e.getMessage());
+            return 0;
+        }
+    }
+
+    private static int executeParticipantRemoveByName(CommandSourceStack source, String name) {
+        MinecraftServer server = source.getServer();
+        java.util.Optional<TournamentParticipantRecord> recordOpt = TournamentStateService.getParticipantByName(server, name);
+        if (recordOpt.isEmpty()) {
+            TournamentMessages.sendFailure(source, "Participante '" + name + "' nao encontrado.");
+            return 0;
+        }
+        TournamentParticipantRecord record = recordOpt.get();
+        boolean removed = TournamentStateService.removeParticipant(server, record.getPlayerUuid());
+        if (!removed) {
+            TournamentMessages.sendFailure(source, "Erro ao remover participante.");
+            return 0;
+        }
+        TournamentMessages.sendSuccess(source, record.getPlayerName() + " removido da lista de participantes.", true);
+        return 1;
+    }
+
+    private static int executeEndTournament(CommandSourceStack source, GameProfile champion) {
+        try {
+            MinecraftServer server = source.getServer();
+            com.bigbang_tournaments.model.TournamentState state = TournamentStateService.getState(server);
+            
+            if (state.getTournamentName() == null || state.getTournamentName().trim().isEmpty()) {
+                TournamentMessages.sendFailure(source, "Não há campeonato ativo para finalizar.");
+                return 0;
+            }
+            
+            String tournamentName = state.getTournamentName();
+            
+            // Set phase
+            state.setTournamentPhase("FINISHED");
+            state.setActiveBattle(null);
+            TournamentStateService.saveState(server);
+            
+            // Broadcast ending
+            Component announcement;
+            if (champion != null) {
+                announcement = TournamentMessages.translatable("commands.tournament.end.announcement.champion", tournamentName, champion.getName());
+            } else {
+                announcement = TournamentMessages.translatable("commands.tournament.end.announcement", tournamentName);
+            }
+            server.getPlayerList().broadcastSystemMessage(announcement, false);
+            
+            // Restore all participants
+            int restored = 0;
+            for (TournamentParticipantRecord participant : TournamentStateService.listParticipants(server)) {
+                ServerPlayer onlinePlayer = server.getPlayerList().getPlayer(participant.getPlayerUuid());
+                if (onlinePlayer != null && SnapshotStorage.hasSnapshot(server, participant.getPlayerUuid())) {
+                    PokemonTeamService.RestoreResult restoreResult = PokemonTeamService.restoreTeam(onlinePlayer);
+                    if (restoreResult.getStatus() == PokemonTeamService.RestoreResult.Status.SUCCESS || 
+                        restoreResult.getStatus() == PokemonTeamService.RestoreResult.Status.PARTIAL) {
+                        TournamentStateService.markRestored(server, participant.getPlayerUuid());
+                        restored++;
+                    }
+                }
+            }
+            
+            TournamentMessages.sendSuccess(source, "Campeonato finalizado. " + restored + " time(s) de jogador(es) restaurado(s).", true);
+            return 1;
+        } catch (Exception e) {
+            TournamentMessages.sendFailure(source, "Erro ao finalizar campeonato: " + e.getMessage());
             return 0;
         }
     }

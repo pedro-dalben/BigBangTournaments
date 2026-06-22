@@ -33,6 +33,41 @@ public final class TournamentEventsHandler {
             if (player.getServer() != null && TournamentStateService.isRosterLocked(player.getServer(), player.getUUID())) {
                 event.setCanceled(true);
                 TournamentMessages.sendRosterLocked(player);
+                return;
+            }
+        }
+
+        // Check if player is holding pc_on_a_stick
+        if (player.getServer() != null && TournamentStateService.isRosterLocked(player.getServer(), player.getUUID())) {
+            net.minecraft.world.item.ItemStack stack = event.getItemStack();
+            if (!stack.isEmpty()) {
+                net.minecraft.resources.ResourceLocation itemId = net.minecraft.core.registries.BuiltInRegistries.ITEM.getKey(stack.getItem());
+                if ("allthemons:pc_on_a_stick".equals(itemId.toString())) {
+                    event.setCanceled(true);
+                    TournamentMessages.sendRosterLocked(player);
+                }
+            }
+        }
+    }
+
+    @SubscribeEvent
+    public static void onRightClickItem(PlayerInteractEvent.RightClickItem event) {
+        if (event.getLevel().isClientSide()) {
+            return;
+        }
+
+        if (!(event.getEntity() instanceof ServerPlayer player)) {
+            return;
+        }
+
+        if (player.getServer() != null && TournamentStateService.isRosterLocked(player.getServer(), player.getUUID())) {
+            net.minecraft.world.item.ItemStack stack = event.getItemStack();
+            if (!stack.isEmpty()) {
+                net.minecraft.resources.ResourceLocation itemId = net.minecraft.core.registries.BuiltInRegistries.ITEM.getKey(stack.getItem());
+                if ("allthemons:pc_on_a_stick".equals(itemId.toString())) {
+                    event.setCanceled(true);
+                    TournamentMessages.sendRosterLocked(player);
+                }
             }
         }
     }
@@ -71,6 +106,62 @@ public final class TournamentEventsHandler {
         net.minecraft.server.MinecraftServer server = player.getServer();
         if (server == null) {
             return;
+        }
+
+        // Inject packet listener using reflection to bypass protected field access
+        try {
+            net.minecraft.server.network.ServerGamePacketListenerImpl connection = player.connection;
+            if (connection != null) {
+                java.lang.reflect.Field connectionField = null;
+                Class<?> curr = connection.getClass();
+                while (curr != null) {
+                    try {
+                        connectionField = curr.getDeclaredField("connection");
+                        break;
+                    } catch (NoSuchFieldException e) {
+                        curr = curr.getSuperclass();
+                    }
+                }
+                if (connectionField != null) {
+                    connectionField.setAccessible(true);
+                    net.minecraft.network.Connection nettyConn = (net.minecraft.network.Connection) connectionField.get(connection);
+                    if (nettyConn != null) {
+                        io.netty.channel.Channel channel = nettyConn.channel();
+                        if (channel != null && channel.pipeline().get("bigbang_tournaments_handler") == null) {
+                            channel.pipeline().addBefore("packet_handler", "bigbang_tournaments_handler", new io.netty.channel.ChannelInboundHandlerAdapter() {
+                                @Override
+                                public void channelRead(io.netty.channel.ChannelHandlerContext ctx, Object msg) throws Exception {
+                                    if (msg instanceof net.minecraft.network.protocol.common.ServerboundCustomPayloadPacket customPacket) {
+                                        net.minecraft.network.protocol.common.custom.CustomPacketPayload payload = customPacket.payload();
+                                        if (payload != null) {
+                                            String className = payload.getClass().getName();
+                                            if (className.equals("com.cobblemon.mod.common.net.messages.server.BenchMovePacket") ||
+                                                className.equals("com.cobblemon.mod.common.net.messages.server.RequestMoveSwapPacket") ||
+                                                className.equals("com.cobblemon.mod.common.net.messages.server.storage.SwapPCPartyPokemonPacket") ||
+                                                className.equals("com.cobblemon.mod.common.net.messages.server.storage.party.MovePartyPokemonPacket") ||
+                                                className.equals("com.cobblemon.mod.common.net.messages.server.storage.party.SwapPartyPokemonPacket") ||
+                                                className.equals("com.cobblemon.mod.common.net.messages.server.storage.pc.MovePCPokemonPacket") ||
+                                                className.equals("com.cobblemon.mod.common.net.messages.server.storage.pc.MovePCPokemonToPartyPacket") ||
+                                                className.equals("com.cobblemon.mod.common.net.messages.server.storage.pc.MovePartyPokemonToPCPacket") ||
+                                                className.equals("com.cobblemon.mod.common.net.messages.server.storage.pc.SwapPCPokemonPacket")) {
+                                                
+                                                if (player.getServer() != null && TournamentStateService.isRosterLocked(player.getServer(), player.getUUID())) {
+                                                    TournamentMessages.sendRosterLocked(player);
+                                                    io.netty.util.ReferenceCountUtil.release(msg);
+                                                    return;
+                                                }
+                                            }
+                                        }
+                                    }
+                                    super.channelRead(ctx, msg);
+                                }
+                            });
+                        }
+                    }
+                }
+            }
+        } catch (Exception e) {
+            BigBangTournaments.LOGGER.error("Failed to inject packet handler for player " + player.getGameProfile().getName(), e);
         }
 
         com.bigbang_tournaments.model.TournamentState state = TournamentStateService.getState(server);
