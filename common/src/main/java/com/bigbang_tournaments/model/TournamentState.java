@@ -123,8 +123,10 @@ public class TournamentState {
             String normalizedType = tournamentType.toLowerCase().trim();
             if ("singleelement".equals(normalizedType) || "monotype".equals(normalizedType)) {
                 normalizedType = "singletype";
-            } else if (!"standard".equals(normalizedType) && !"singletype".equals(normalizedType)) {
-                normalizedType = tournamentType;
+            } else if ("2v2".equals(normalizedType) || "duplas".equals(normalizedType)) {
+                normalizedType = "doubles";
+            } else if ("regulation_i".equals(normalizedType) || "vgc_doubles".equals(normalizedType) || "vgc_reg_i".equals(normalizedType)) {
+                normalizedType = "regulation_i_doubles";
             }
             if (!tournamentType.equals(normalizedType)) {
                 tournamentType = normalizedType;

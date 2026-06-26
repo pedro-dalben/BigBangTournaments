@@ -118,6 +118,8 @@ public final class TournamentCommandRegistrar {
                                 .suggests((context, builder) -> {
                                     builder.suggest("standard");
                                     builder.suggest("singletype");
+                                    builder.suggest("doubles");
+                                    builder.suggest("regulation_i_doubles");
                                     return builder.buildFuture();
                                 })
                                 .executes(context -> executeStartTournament(
@@ -159,6 +161,11 @@ public final class TournamentCommandRegistrar {
                                             builder.suggest("singleelement");
                                             builder.suggest("singletype");
                                             builder.suggest("monotype");
+                                            builder.suggest("doubles");
+                                            builder.suggest("2v2");
+                                            builder.suggest("duplas");
+                                            builder.suggest("regulation_i_doubles");
+                                            builder.suggest("standard");
                                             return builder.buildFuture();
                                         })
                                         .then(Commands.argument("nome", StringArgumentType.greedyString())

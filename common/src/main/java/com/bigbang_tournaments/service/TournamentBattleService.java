@@ -6,6 +6,7 @@ import com.bigbang_tournaments.model.TournamentBattleStatus;
 import com.bigbang_tournaments.model.TournamentParticipantRecord;
 import com.bigbang_tournaments.model.TournamentPosition;
 import com.bigbang_tournaments.model.TournamentRuleViolation;
+import com.bigbang_tournaments.model.TournamentState;
 import com.bigbang_tournaments.util.TournamentMessages;
 import com.cobblemon.mod.common.api.battles.model.PokemonBattle;
 import com.cobblemon.mod.common.api.events.battles.BattleFledEvent;
@@ -365,7 +366,16 @@ public final class TournamentBattleService {
             return;
         }
 
-        BattleStartResult result = BattleBuilder.INSTANCE.pvp1v1(player1, player2, null, null, BattleFormat.Companion.getGEN_9_SINGLES(), false, false);
+        TournamentState state = TournamentStateService.getState(server);
+        com.cobblemon.mod.common.battles.BattleFormat format = com.cobblemon.mod.common.battles.BattleFormat.Companion.getGEN_9_SINGLES();
+        if (state != null) {
+            String modeId = TournamentModeRegistry.resolve(state.getTournamentType()).id();
+            if ("doubles".equals(modeId) || "regulation_i_doubles".equals(modeId)) {
+                format = com.cobblemon.mod.common.battles.BattleFormat.Companion.getGEN_9_DOUBLES();
+            }
+        }
+
+        BattleStartResult result = BattleBuilder.INSTANCE.pvp1v1(player1, player2, null, null, format, false, false);
         if (result instanceof SuccessfulBattleStart successfulBattleStart) {
             PokemonBattle battle = successfulBattleStart.getBattle();
             activeBattle.setBattleId(battle.getBattleId().toString());

@@ -78,6 +78,12 @@ public final class TournamentStateService {
         if ("singletype".equals(lower) || "singleelement".equals(lower) || "monotype".equals(lower)) {
             return "singletype";
         }
+        if ("doubles".equals(lower) || "2v2".equals(lower) || "duplas".equals(lower)) {
+            return "doubles";
+        }
+        if ("regulation_i_doubles".equals(lower) || "regulation_i".equals(lower) || "vgc_doubles".equals(lower) || "vgc_reg_i".equals(lower)) {
+            return "regulation_i_doubles";
+        }
         if ("standard".equals(lower)) {
             return "standard";
         }
