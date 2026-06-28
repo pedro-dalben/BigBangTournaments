@@ -20,6 +20,13 @@ import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.item.ItemStack;
+import net.minecraft.nbt.CompoundTag;
+import net.minecraft.nbt.ListTag;
+import net.minecraft.nbt.NbtIo;
+import net.minecraft.nbt.NbtAccounter;
+import java.nio.file.Path;
+import java.nio.file.Files;
+import net.minecraft.world.level.storage.LevelResource;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -472,5 +479,68 @@ public final class PokemonTeamService {
 
     private static String normalize(String value) {
         return value == null ? "" : value.trim().toLowerCase(Locale.ROOT);
+    }
+
+    private static Path getStorageDirectory(MinecraftServer server) {
+        Path serverConfig = server.getWorldPath(LevelResource.ROOT).resolve("serverconfig");
+        return serverConfig.resolve("bigbang_tournaments");
+    }
+
+    public static void saveOriginalPartyToDisk(MinecraftServer server, ServerPlayer player, List<Pokemon> originalParty) throws IOException {
+        Path dir = getStorageDirectory(server).resolve("original_parties");
+        if (!Files.exists(dir)) {
+            Files.createDirectories(dir);
+        }
+        Path targetPath = dir.resolve(player.getUUID().toString() + ".dat");
+
+        CompoundTag root = new CompoundTag();
+        ListTag listTag = new ListTag();
+        for (Pokemon p : originalParty) {
+            CompoundTag pTag = new CompoundTag();
+            p.saveToNBT(server.registryAccess(), pTag);
+            listTag.add(pTag);
+        }
+        root.put("party", listTag);
+
+        try (var out = Files.newOutputStream(targetPath)) {
+            NbtIo.writeCompressed(root, out);
+        }
+    }
+
+    public static List<Pokemon> loadOriginalPartyFromDisk(MinecraftServer server, UUID playerUuid) {
+        Path dir = getStorageDirectory(server).resolve("original_parties");
+        Path targetPath = dir.resolve(playerUuid.toString() + ".dat");
+        if (!Files.exists(targetPath)) {
+            return null;
+        }
+
+        try {
+            CompoundTag root;
+            try (var in = Files.newInputStream(targetPath)) {
+                root = NbtIo.readCompressed(in, NbtAccounter.unlimitedHeap());
+            }
+            ListTag listTag = root.getList("party", 10);
+            List<Pokemon> party = new ArrayList<>();
+            for (int i = 0; i < listTag.size(); i++) {
+                CompoundTag pTag = listTag.getCompound(i);
+                Pokemon p = Pokemon.Companion.loadFromNBT(server.registryAccess(), pTag);
+                party.add(p);
+            }
+            return party;
+        } catch (Exception e) {
+            LOGGER.error("Failed to load original party from disk for player " + playerUuid, e);
+            return null;
+        }
+    }
+
+    public static boolean deleteOriginalPartyFile(MinecraftServer server, UUID playerUuid) {
+        Path dir = getStorageDirectory(server).resolve("original_parties");
+        Path targetPath = dir.resolve(playerUuid.toString() + ".dat");
+        try {
+            return Files.deleteIfExists(targetPath);
+        } catch (IOException e) {
+            LOGGER.error("Failed to delete original party file for player " + playerUuid, e);
+            return false;
+        }
     }
 }

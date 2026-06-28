@@ -4,6 +4,7 @@ import com.bigbang_tournaments.neoforge.BigBangTournaments;
 import com.bigbang_tournaments.service.TournamentBattleService;
 import com.bigbang_tournaments.service.TournamentStateService;
 import com.bigbang_tournaments.util.TournamentMessages;
+import java.util.UUID;
 import com.cobblemon.mod.common.api.Priority;
 import com.cobblemon.mod.common.api.events.CobblemonEvents;
 import com.cobblemon.mod.common.platform.events.PlatformEvents;
@@ -30,7 +31,7 @@ public final class TournamentCobblemonEventRegistrar {
             }
             var uuid1 = tradeEvent.getTradeParticipant1().getUuid();
             var uuid2 = tradeEvent.getTradeParticipant2().getUuid();
-            if (TournamentStateService.isRosterLocked(server, uuid1) || TournamentStateService.isRosterLocked(server, uuid2)) {
+            if (TournamentStateService.isPartyLockedForTournament(server, uuid1) || TournamentStateService.isPartyLockedForTournament(server, uuid2)) {
                 tradeEvent.cancel();
                 ServerPlayer player1 = server.getPlayerList().getPlayer(uuid1);
                 ServerPlayer player2 = server.getPlayerList().getPlayer(uuid2);
@@ -45,7 +46,7 @@ public final class TournamentCobblemonEventRegistrar {
 
         CobblemonEvents.POKEMON_RELEASED_EVENT_PRE.subscribe(Priority.HIGHEST, releaseEvent -> {
             ServerPlayer player = releaseEvent.getPlayer();
-            if (player.getServer() != null && TournamentStateService.isRosterLocked(player.getServer(), player.getUUID())) {
+            if (player.getServer() != null && TournamentStateService.isPartyLockedForTournament(player.getServer(), player.getUUID())) {
                 releaseEvent.cancel();
                 TournamentMessages.sendRosterLocked(player);
             }
@@ -53,7 +54,7 @@ public final class TournamentCobblemonEventRegistrar {
 
         CobblemonEvents.HELD_ITEM_PRE.subscribe(Priority.HIGHEST, event -> {
             ServerPlayer owner = event.getPokemon().getOwnerPlayer();
-            if (owner != null && owner.getServer() != null && TournamentStateService.isRosterLocked(owner.getServer(), owner.getUUID())) {
+            if (owner != null && owner.getServer() != null && TournamentStateService.isPartyLockedForTournament(owner.getServer(), owner.getUUID())) {
                 event.cancel();
                 TournamentMessages.sendRosterLocked(owner);
             }
@@ -61,7 +62,7 @@ public final class TournamentCobblemonEventRegistrar {
 
         CobblemonEvents.COSMETIC_ITEM_PRE.subscribe(Priority.HIGHEST, event -> {
             ServerPlayer owner = event.getPokemon().getOwnerPlayer();
-            if (owner != null && owner.getServer() != null && TournamentStateService.isRosterLocked(owner.getServer(), owner.getUUID())) {
+            if (owner != null && owner.getServer() != null && TournamentStateService.isPartyLockedForTournament(owner.getServer(), owner.getUUID())) {
                 event.cancel();
                 TournamentMessages.sendRosterLocked(owner);
             }
@@ -72,7 +73,7 @@ public final class TournamentCobblemonEventRegistrar {
                 return;
             }
             var server = net.neoforged.neoforge.server.ServerLifecycleHooks.getCurrentServer();
-            if (server == null || !TournamentStateService.isRosterLocked(server, event.getOwnerId())) {
+            if (server == null || !TournamentStateService.isPartyLockedForTournament(server, event.getOwnerId())) {
                 return;
             }
             ServerPlayer owner = server.getPlayerList().getPlayer(event.getOwnerId());

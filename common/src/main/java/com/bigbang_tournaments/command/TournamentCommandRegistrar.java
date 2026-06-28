@@ -106,6 +106,26 @@ public final class TournamentCommandRegistrar {
                                                 context.getSource(),
                                                 EntityArgument.getPlayer(context, "player1"),
                                                 EntityArgument.getPlayer(context, "player2"))))))
+                .then(Commands.literal("duel")
+                        .requires(source -> source.hasPermission(TournamentStateService.getAdminPermissionLevel(source.getServer())))
+                        .then(Commands.argument("player1", EntityArgument.player())
+                                .then(Commands.argument("player2", EntityArgument.player())
+                                        .executes(context -> TournamentBattleService.startBattle(
+                                                context.getSource(),
+                                                EntityArgument.getPlayer(context, "player1"),
+                                                EntityArgument.getPlayer(context, "player2"))))))
+                .then(Commands.literal("select")
+                        .then(Commands.argument("slot1", IntegerArgumentType.integer(1, 6))
+                                .then(Commands.argument("slot2", IntegerArgumentType.integer(1, 6))
+                                        .then(Commands.argument("slot3", IntegerArgumentType.integer(1, 6))
+                                                .then(Commands.argument("slot4", IntegerArgumentType.integer(1, 6))
+                                                        .executes(context -> executeSelectTeam(
+                                                                context.getSource(),
+                                                                IntegerArgumentType.getInteger(context, "slot1"),
+                                                                IntegerArgumentType.getInteger(context, "slot2"),
+                                                                IntegerArgumentType.getInteger(context, "slot3"),
+                                                                IntegerArgumentType.getInteger(context, "slot4")
+                                                        )))))))
                 .then(Commands.literal("win")
                         .requires(source -> source.hasPermission(TournamentStateService.getAdminPermissionLevel(source.getServer())))
                         .then(Commands.argument("player", EntityArgument.player())
@@ -954,5 +974,10 @@ public final class TournamentCommandRegistrar {
             TournamentMessages.sendFailure(source, "Erro ao finalizar campeonato: " + e.getMessage());
             return 0;
         }
+    }
+
+    private static int executeSelectTeam(CommandSourceStack source, int slot1, int slot2, int slot3, int slot4) throws com.mojang.brigadier.exceptions.CommandSyntaxException {
+        ServerPlayer player = source.getPlayerOrException();
+        return com.bigbang_tournaments.service.TournamentBattleService.selectTeam(player, slot1, slot2, slot3, slot4);
     }
 }

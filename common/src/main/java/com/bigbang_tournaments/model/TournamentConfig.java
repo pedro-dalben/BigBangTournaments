@@ -48,6 +48,7 @@ public class TournamentConfig {
     private int reconnectWindowSeconds = 300;
     private int adminPermissionLevel = 2;
     private int defaultRerolls = 1;
+    private TeamPreviewConfig teamPreview = new TeamPreviewConfig();
     private String registeredLoginMessage = "Faltam %d dias para o campeonato!";
     private String unregisteredLoginMessage = "ira acontecer um campeonato no dia %s as %s, para se inscrever digite /torneio participar";
     private String broadcastRegistrationMessage = "O %s se inscreveu no campeonato!";
@@ -210,6 +211,17 @@ public class TournamentConfig {
 
     public void setReconnectWindowSeconds(int reconnectWindowSeconds) {
         this.reconnectWindowSeconds = reconnectWindowSeconds;
+    }
+
+    public TeamPreviewConfig getTeamPreview() {
+        if (teamPreview == null) {
+            teamPreview = new TeamPreviewConfig();
+        }
+        return teamPreview;
+    }
+
+    public void setTeamPreview(TeamPreviewConfig teamPreview) {
+        this.teamPreview = teamPreview;
     }
 
     public int getAdminPermissionLevel() {

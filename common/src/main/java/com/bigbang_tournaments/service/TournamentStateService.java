@@ -164,6 +164,13 @@ public final class TournamentStateService {
         return getParticipant(server, playerUuid).map(TournamentParticipantRecord::isRosterLocked).orElse(false);
     }
 
+    public static boolean isPartyLockedForTournament(MinecraftServer server, UUID playerUuid) {
+        if (isRosterLocked(server, playerUuid)) {
+            return true;
+        }
+        return TournamentBattleService.isPlayerInBattleSession(playerUuid);
+    }
+
     public static void markPending(MinecraftServer server, ServerPlayer player, int level, List<TournamentRuleViolation> violations) {
         TournamentParticipantRecord record = upsertParticipant(player);
         long now = System.currentTimeMillis();

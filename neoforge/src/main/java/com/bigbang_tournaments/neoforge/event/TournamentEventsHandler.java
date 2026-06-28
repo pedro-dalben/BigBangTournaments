@@ -30,7 +30,7 @@ public final class TournamentEventsHandler {
 
         // Check if the block is the Cobblemon PC block
         if (block instanceof com.cobblemon.mod.common.block.PCBlock) {
-            if (player.getServer() != null && TournamentStateService.isRosterLocked(player.getServer(), player.getUUID())) {
+            if (player.getServer() != null && TournamentStateService.isPartyLockedForTournament(player.getServer(), player.getUUID())) {
                 event.setCanceled(true);
                 TournamentMessages.sendRosterLocked(player);
                 return;
@@ -38,7 +38,7 @@ public final class TournamentEventsHandler {
         }
 
         // Check if player is holding pc_on_a_stick
-        if (player.getServer() != null && TournamentStateService.isRosterLocked(player.getServer(), player.getUUID())) {
+        if (player.getServer() != null && TournamentStateService.isPartyLockedForTournament(player.getServer(), player.getUUID())) {
             net.minecraft.world.item.ItemStack stack = event.getItemStack();
             if (!stack.isEmpty()) {
                 net.minecraft.resources.ResourceLocation itemId = net.minecraft.core.registries.BuiltInRegistries.ITEM.getKey(stack.getItem());
@@ -60,7 +60,7 @@ public final class TournamentEventsHandler {
             return;
         }
 
-        if (player.getServer() != null && TournamentStateService.isRosterLocked(player.getServer(), player.getUUID())) {
+                                                if (player.getServer() != null && TournamentStateService.isPartyLockedForTournament(player.getServer(), player.getUUID())) {
             net.minecraft.world.item.ItemStack stack = event.getItemStack();
             if (!stack.isEmpty()) {
                 net.minecraft.resources.ResourceLocation itemId = net.minecraft.core.registries.BuiltInRegistries.ITEM.getKey(stack.getItem());
@@ -79,7 +79,7 @@ public final class TournamentEventsHandler {
             return;
         }
 
-        if (player.getServer() != null && TournamentStateService.isRosterLocked(player.getServer(), player.getUUID())) {
+        if (player.getServer() != null && TournamentStateService.isPartyLockedForTournament(player.getServer(), player.getUUID())) {
             String command = event.getParseResults().getReader().getString().trim();
             if (command.startsWith("/")) {
                 command = command.substring(1);
@@ -107,6 +107,9 @@ public final class TournamentEventsHandler {
         if (server == null) {
             return;
         }
+
+        // Handle VGC battle session recovery on login
+        com.bigbang_tournaments.service.TournamentBattleService.handleLogin(player);
 
         // Inject packet listener using reflection to bypass protected field access
         try {
@@ -145,7 +148,7 @@ public final class TournamentEventsHandler {
                                                 className.equals("com.cobblemon.mod.common.net.messages.server.storage.pc.MovePartyPokemonToPCPacket") ||
                                                 className.equals("com.cobblemon.mod.common.net.messages.server.storage.pc.SwapPCPokemonPacket")) {
                                                 
-                                                if (player.getServer() != null && TournamentStateService.isRosterLocked(player.getServer(), player.getUUID())) {
+        if (player.getServer() != null && TournamentStateService.isPartyLockedForTournament(player.getServer(), player.getUUID())) {
                                                     TournamentMessages.sendRosterLocked(player);
                                                     io.netty.util.ReferenceCountUtil.release(msg);
                                                     return;
