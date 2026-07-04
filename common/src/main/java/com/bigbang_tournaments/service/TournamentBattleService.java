@@ -37,8 +37,15 @@ public final class TournamentBattleService {
     private static final Map<UUID, AreaLock> AREA_LOCKS = new HashMap<>();
     private static final ConcurrentMap<UUID, TimerTaskInfo> PENDING_TIMERS = new ConcurrentHashMap<>();
     private static final ConcurrentMap<UUID, UUID> ACTIVE_SESSION_BY_PLAYER = new ConcurrentHashMap<>();
+    private static MinecraftServer currentServer;
 
     private TournamentBattleService() {
+    }
+
+    public static void removeActiveSession(UUID playerUuid) {
+        if (playerUuid != null) {
+            ACTIVE_SESSION_BY_PLAYER.remove(playerUuid);
+        }
     }
 
     private static class TimerTaskInfo {
@@ -307,7 +314,15 @@ public final class TournamentBattleService {
         if (!battle.isPvP()) {
             return;
         }
-        MinecraftServer server = battle.getPlayers().isEmpty() ? null : battle.getPlayers().get(0).getServer();
+        MinecraftServer server = null;
+        if (!battle.getPlayers().isEmpty() && battle.getPlayers().get(0) != null) {
+            server = battle.getPlayers().get(0).getServer();
+        }
+        if (server == null) {
+            server = currentServer;
+        } else {
+            currentServer = server;
+        }
         if (server == null) {
             return;
         }
@@ -348,15 +363,37 @@ public final class TournamentBattleService {
 
     public static void handleBattleVictory(BattleVictoryEvent event) {
         PokemonBattle battle = event.getBattle();
-        MinecraftServer server = battle.getPlayers().isEmpty() ? null : battle.getPlayers().get(0).getServer();
+        MinecraftServer server = null;
+        if (!battle.getPlayers().isEmpty() && battle.getPlayers().get(0) != null) {
+            server = battle.getPlayers().get(0).getServer();
+        }
+        if (server == null) {
+            server = currentServer;
+        } else {
+            currentServer = server;
+        }
         if (server == null) {
             return;
         }
 
-        UUID sessionId = findSessionForPlayers(server, battle.getPlayerUUIDs());
+        Set<UUID> allUuids = new HashSet<>();
+        if (battle.getPlayerUUIDs() != null) {
+            for (UUID u : battle.getPlayerUUIDs()) if (u != null) allUuids.add(u);
+        }
+        if (event.getWinners() != null) {
+            for (var w : event.getWinners()) if (w != null && w.getUuid() != null) allUuids.add(w.getUuid());
+        }
+        if (event.getLosers() != null) {
+            for (var l : event.getLosers()) if (l != null && l.getUuid() != null) allUuids.add(l.getUuid());
+        }
+        if (battle.getPlayers() != null) {
+            for (var p : battle.getPlayers()) if (p != null && p.getUUID() != null) allUuids.add(p.getUUID());
+        }
+
+        UUID sessionId = findSessionForPlayers(server, allUuids);
         if (sessionId != null) {
             TournamentBattleFinalizationService.safeFinalize(server, sessionId, "battle_victory");
-            for (UUID uuid : battle.getPlayerUUIDs()) {
+            for (UUID uuid : allUuids) {
                 ACTIVE_SESSION_BY_PLAYER.remove(uuid);
             }
         }
@@ -402,30 +439,39 @@ public final class TournamentBattleService {
 
     public static void handleBattleFled(BattleFledEvent event) {
         ServerPlayer player = event.getPlayer().getEntity();
-        if (player == null || player.getServer() == null) {
+        MinecraftServer server = player != null ? player.getServer() : currentServer;
+        if (server != null) {
+            currentServer = server;
+        }
+        if (player == null || server == null) {
             return;
         }
         UUID sessionId = ACTIVE_SESSION_BY_PLAYER.get(player.getUUID());
         if (sessionId != null) {
-            TournamentBattleFinalizationService.safeFinalize(player.getServer(), sessionId, "fled");
+            TournamentBattleFinalizationService.safeFinalize(server, sessionId, "fled", player);
             ACTIVE_SESSION_BY_PLAYER.remove(player.getUUID());
-            UUID opponentUuid = findOpponentInSession(player.getServer(), sessionId, player.getUUID());
+            UUID opponentUuid = findOpponentInSession(server, sessionId, player.getUUID());
             if (opponentUuid != null) {
                 ACTIVE_SESSION_BY_PLAYER.remove(opponentUuid);
             }
         }
-        markManualResultRequired(player.getServer(), player.getUUID(), "fuga");
+        markManualResultRequired(server, player.getUUID(), "fuga");
     }
 
     public static void handleDisconnect(ServerPlayer player) {
         MinecraftServer server = player.getServer();
+        if (server == null) {
+            server = currentServer;
+        } else {
+            currentServer = server;
+        }
         if (server == null) {
             return;
         }
 
         UUID sessionId = ACTIVE_SESSION_BY_PLAYER.get(player.getUUID());
         if (sessionId != null) {
-            TournamentBattleFinalizationService.safeFinalize(server, sessionId, "player_disconnected");
+            TournamentBattleFinalizationService.safeFinalize(server, sessionId, "player_disconnected", player);
             ACTIVE_SESSION_BY_PLAYER.remove(player.getUUID());
         }
 
@@ -448,6 +494,7 @@ public final class TournamentBattleService {
     }
 
     public static void handleRestartRecovery(MinecraftServer server) {
+        currentServer = server;
         TournamentBattleRecord activeBattle = TournamentStateService.getActiveBattle(server);
         if (activeBattle != null && activeBattle.isInterruptedByRestart()) {
             TournamentMessages.broadcastInterruptedRestart(server);
@@ -488,25 +535,21 @@ public final class TournamentBattleService {
     public static void handleLogin(ServerPlayer player) {
         MinecraftServer server = player.getServer();
         if (server == null) return;
+        currentServer = server;
 
         restorePlayerOriginalParty(server, player.getUUID());
 
         List<TournamentBattleSession> activeSessions = TournamentBattleSessionStorage.listActiveSessions(server);
         for (TournamentBattleSession session : activeSessions) {
             if (player.getUUID().equals(session.getPlayerOneUuid()) || player.getUUID().equals(session.getPlayerTwoUuid())) {
-                if (session.getState() == TournamentBattleStatus.RESTORE_PENDING
+                if (session.getState().isPartyModified()
+                        || session.getState() == TournamentBattleStatus.RESTORE_PENDING
                         || session.getState() == TournamentBattleStatus.RESTORING
                         || session.getState() == TournamentBattleStatus.FAILED) {
 
-                    UUID otherUuid = player.getUUID().equals(session.getPlayerOneUuid())
-                            ? session.getPlayerTwoUuid() : session.getPlayerOneUuid();
-                    ServerPlayer otherPlayer = server.getPlayerList().getPlayer(otherUuid);
-
-                    if (otherPlayer != null || session.getState() == TournamentBattleStatus.FAILED) {
-                        TournamentBattleFinalizationService.safeFinalize(server, session.getSessionId(), "login_recovery");
-                        ACTIVE_SESSION_BY_PLAYER.remove(session.getPlayerOneUuid());
-                        ACTIVE_SESSION_BY_PLAYER.remove(session.getPlayerTwoUuid());
-                    }
+                    TournamentBattleFinalizationService.safeFinalize(server, session.getSessionId(), "login_recovery", player);
+                    ACTIVE_SESSION_BY_PLAYER.remove(session.getPlayerOneUuid());
+                    ACTIVE_SESSION_BY_PLAYER.remove(session.getPlayerTwoUuid());
                 }
             }
         }
@@ -548,6 +591,7 @@ public final class TournamentBattleService {
             }
         }
 
+        currentServer = server;
         BattleStartResult result = BattleBuilder.INSTANCE.pvp1v1(player1, player2, null, null, format, false, false);
         if (result instanceof SuccessfulBattleStart successfulBattleStart) {
             PokemonBattle battle = successfulBattleStart.getBattle();
@@ -555,6 +599,14 @@ public final class TournamentBattleService {
             activeBattle.setStatus(TournamentBattleStatus.ACTIVE);
             activeBattle.setUpdatedAt(System.currentTimeMillis());
             TournamentStateService.setActiveBattle(server, activeBattle);
+            UUID sessId = ACTIVE_SESSION_BY_PLAYER.get(player1.getUUID());
+            if (sessId != null) {
+                TournamentBattleSession session = TournamentBattleSessionStorage.loadSession(server, sessId);
+                if (session != null) {
+                    session.transitionTo(TournamentBattleStatus.ACTIVE);
+                    try { TournamentBattleSessionStorage.saveSession(server, session); } catch (Exception ignored) {}
+                }
+            }
             TournamentMessages.broadcastBattleStarted(server, player1.getGameProfile().getName(), player2.getGameProfile().getName());
             return;
         }
@@ -676,15 +728,17 @@ public final class TournamentBattleService {
     }
 
     private static UUID findSessionForPlayers(MinecraftServer server, Iterable<UUID> playerUuids) {
-        List<UUID> uuids = new ArrayList<>();
-        for (UUID uuid : playerUuids) uuids.add(uuid);
-        if (uuids.size() < 2) return null;
-
-        UUID id1 = ACTIVE_SESSION_BY_PLAYER.get(uuids.get(0));
-        UUID id2 = ACTIVE_SESSION_BY_PLAYER.get(uuids.get(1));
-        if (id1 != null && id1.equals(id2)) {
-            TournamentBattleSession session = TournamentBattleSessionStorage.loadSession(server, id1);
-            if (session != null) return id1;
+        if (playerUuids == null) return null;
+        for (UUID uuid : playerUuids) {
+            if (uuid != null) {
+                UUID sessionId = ACTIVE_SESSION_BY_PLAYER.get(uuid);
+                if (sessionId != null) {
+                    TournamentBattleSession session = TournamentBattleSessionStorage.loadSession(server, sessionId);
+                    if (session != null) {
+                        return sessionId;
+                    }
+                }
+            }
         }
         return null;
     }

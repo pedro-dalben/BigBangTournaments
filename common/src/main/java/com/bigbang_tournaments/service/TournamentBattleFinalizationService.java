@@ -4,9 +4,13 @@ import com.bigbang_tournaments.model.TournamentBattleSession;
 import com.bigbang_tournaments.model.TournamentBattleStatus;
 import com.bigbang_tournaments.storage.TournamentBattleSessionStorage;
 import net.minecraft.server.MinecraftServer;
+import net.minecraft.server.level.ServerPlayer;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -24,7 +28,24 @@ public class TournamentBattleFinalizationService {
         ERROR
     }
 
+    public static FinalizeResult safeFinalize(MinecraftServer server, UUID sessionId, String reason) {
+        return safeFinalize(server, sessionId, reason, null);
+    }
+
+    public static FinalizeResult safeFinalize(MinecraftServer server, UUID sessionId, String reason, ServerPlayer knownPlayer) {
+        try {
+            return finalizeSession(server, sessionId, reason, knownPlayer);
+        } catch (Exception e) {
+            LOGGER.error("Safe finalization caught exception for session {}", sessionId, e);
+            return FinalizeResult.ERROR;
+        }
+    }
+
     public static FinalizeResult finalizeSession(MinecraftServer server, UUID sessionId, String reason) {
+        return finalizeSession(server, sessionId, reason, null);
+    }
+
+    public static FinalizeResult finalizeSession(MinecraftServer server, UUID sessionId, String reason, ServerPlayer knownPlayer) {
         Object lock = SESSION_LOCKS.computeIfAbsent(sessionId, k -> new Object());
         synchronized (lock) {
             try {
@@ -64,7 +85,15 @@ public class TournamentBattleFinalizationService {
 
                 try {
                     if (session.getPlayerOneSnapshotPath() != null) {
-                        p1Restored = TeamPreviewPartySwapService.restorePlayerFromDisk(server, session, session.getPlayerOneUuid());
+                        Path p1Snap = TournamentBattleSessionStorage.getSnapshotFile(server, sessionId, session.getPlayerOneUuid());
+                        if (Files.exists(p1Snap)) {
+                            p1Restored = TeamPreviewPartySwapService.restorePlayerFromDisk(server, session, session.getPlayerOneUuid(), knownPlayer);
+                            if (p1Restored) {
+                                try { Files.deleteIfExists(p1Snap); } catch (Exception ignored) {}
+                            }
+                        } else {
+                            p1Restored = true;
+                        }
                     } else {
                         p1Restored = true;
                     }
@@ -74,7 +103,15 @@ public class TournamentBattleFinalizationService {
 
                 try {
                     if (session.getPlayerTwoSnapshotPath() != null) {
-                        p2Restored = TeamPreviewPartySwapService.restorePlayerFromDisk(server, session, session.getPlayerTwoUuid());
+                        Path p2Snap = TournamentBattleSessionStorage.getSnapshotFile(server, sessionId, session.getPlayerTwoUuid());
+                        if (Files.exists(p2Snap)) {
+                            p2Restored = TeamPreviewPartySwapService.restorePlayerFromDisk(server, session, session.getPlayerTwoUuid(), knownPlayer);
+                            if (p2Restored) {
+                                try { Files.deleteIfExists(p2Snap); } catch (Exception ignored) {}
+                            }
+                        } else {
+                            p2Restored = true;
+                        }
                     } else {
                         p2Restored = true;
                     }
@@ -102,6 +139,8 @@ public class TournamentBattleFinalizationService {
 
                 if (session.getState() == TournamentBattleStatus.RESTORED) {
                     TournamentBattleSessionStorage.deleteSession(server, sessionId);
+                    TournamentBattleService.removeActiveSession(session.getPlayerOneUuid());
+                    TournamentBattleService.removeActiveSession(session.getPlayerTwoUuid());
                     LOGGER.info("Session {} finalized and cleaned up. Reason: {}", sessionId, reason);
                 }
 
@@ -115,15 +154,6 @@ public class TournamentBattleFinalizationService {
             } finally {
                 SESSION_LOCKS.remove(sessionId);
             }
-        }
-    }
-
-    public static FinalizeResult safeFinalize(MinecraftServer server, UUID sessionId, String reason) {
-        try {
-            return finalizeSession(server, sessionId, reason);
-        } catch (Exception e) {
-            LOGGER.error("Unhandled error in safeFinalize for session {}", sessionId, e);
-            return FinalizeResult.ERROR;
         }
     }
 }

@@ -132,8 +132,15 @@ public class TeamPreviewPartySwapService {
     }
 
     public static boolean restorePlayerFromSnapshot(MinecraftServer server, TournamentBattleSession session, UUID playerUuid, List<Pokemon> originalParty) {
+        return restorePlayerFromSnapshot(server, session, playerUuid, originalParty, null);
+    }
+
+    public static boolean restorePlayerFromSnapshot(MinecraftServer server, TournamentBattleSession session, UUID playerUuid, List<Pokemon> originalParty, ServerPlayer knownPlayer) {
         try {
-            ServerPlayer player = server.getPlayerList().getPlayer(playerUuid);
+            ServerPlayer player = knownPlayer;
+            if (player == null || !player.getUUID().equals(playerUuid)) {
+                player = server.getPlayerList().getPlayer(playerUuid);
+            }
             if (player == null) {
                 LOGGER.warn("Cannot restore party for offline player {} during session {}", playerUuid, session.getSessionId());
                 return false;
@@ -150,6 +157,9 @@ public class TeamPreviewPartySwapService {
             for (Pokemon p : originalParty) {
                 party.add(p);
             }
+            try {
+                party.heal();
+            } catch (Exception ignored) {}
             return true;
         } catch (Exception e) {
             LOGGER.error("Failed to restore party for player {} in session {}", playerUuid, session.getSessionId(), e);
@@ -158,8 +168,15 @@ public class TeamPreviewPartySwapService {
     }
 
     public static boolean restorePlayerFromDisk(MinecraftServer server, TournamentBattleSession session, UUID playerUuid) {
+        return restorePlayerFromDisk(server, session, playerUuid, null);
+    }
+
+    public static boolean restorePlayerFromDisk(MinecraftServer server, TournamentBattleSession session, UUID playerUuid, ServerPlayer knownPlayer) {
         try {
-            ServerPlayer player = server.getPlayerList().getPlayer(playerUuid);
+            ServerPlayer player = knownPlayer;
+            if (player == null || !player.getUUID().equals(playerUuid)) {
+                player = server.getPlayerList().getPlayer(playerUuid);
+            }
             if (player == null) {
                 LOGGER.warn("Cannot restore party from disk for offline player {} in session {}", playerUuid, session.getSessionId());
                 return false;
@@ -219,7 +236,7 @@ public class TeamPreviewPartySwapService {
                 originalParty.add(p);
             }
 
-            return restorePlayerFromSnapshot(server, session, playerUuid, originalParty);
+            return restorePlayerFromSnapshot(server, session, playerUuid, originalParty, player);
         } catch (Exception e) {
             LOGGER.error("Failed to restore player {} from disk snapshot in session {}", playerUuid, session.getSessionId(), e);
             return false;
