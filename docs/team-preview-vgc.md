@@ -91,8 +91,8 @@ A restauração usa exclusivamente os dados do snapshot em disco:
 - Verifica playerUuid correspondente
 - Valida checksum SHA-256
 - Reconstrói Pokémon do NBT
-- Substitui party ativa
-- Só remove snapshot após restauração confirmada
+- Substitui party ativa e aplica cura completa (`party.heal()`)
+- Remove o snapshot individual (`<playerUuid>.nbt`) imediatamente após a restauração bem-sucedida do jogador, garantindo independência e resiliência na recuperação de dados
 
 ## Finalização Idempotente
 
@@ -100,9 +100,9 @@ A restauração usa exclusivamente os dados do snapshot em disco:
 
 - Lock por sessão (synchronized)
 - Compare-and-set de estado para `RESTORE_PENDING`
-- Restaura ambos os jogadores
-- Transição para `RESTORED` apenas após sucesso
-- Snapshot removido apenas após `RESTORED`
+- Restaura os jogadores de forma independente (se um jogador estiver offline no término da batalha, o jogador online é restaurado imediatamente sem erros ou bloqueios)
+- Transição para `RESTORED` apenas após sucesso de todos os participantes
+- Snapshot removido individualmente por jogador logo após sua restauração e diretório da sessão limpo em `RESTORED`
 - Chamadas paralelas são rejeitadas se estado já terminal
 
 Caminhos que convergem para finalização:
