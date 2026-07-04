@@ -296,4 +296,17 @@ class TournamentBattleSessionStateMachineTest {
         TournamentBattleSession session = createSession();
         assertFalse(session.transitionTo(TournamentBattleStatus.CREATED));
     }
+
+    @Test
+    void doublesModeSessionSupportsTeamPreview() {
+        TournamentBattleSession session = new TournamentBattleSession(
+                UUID.randomUUID(), "player1",
+                UUID.randomUUID(), "player2",
+                "doubles"
+        );
+        assertEquals("doubles", session.getBattleFormat());
+        assertTrue(session.transitionTo(TournamentBattleStatus.TEAM_PREVIEW));
+        assertEquals(TournamentBattleStatus.TEAM_PREVIEW, session.getState());
+        assertTrue(session.getState().isPreviewActive());
+    }
 }

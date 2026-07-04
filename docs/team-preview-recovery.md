@@ -57,8 +57,8 @@ world/serverconfig/bigbang_tournaments/
    a restauração falha e a sessão vai para `FAILED`. O administrador deve
    restaurar manualmente usando backups.
 
-3. **Formato não-VGC**: Apenas torneios `regulation_i_doubles` usam sessão.
-   Outros formatos (standard, doubles) usam o fluxo COUNTDOWN direto.
+3. **Formatos sem Team Preview**: Os torneios de duplas (`doubles` e `regulation_i_doubles`) usam sessão para a escolha de 4 Pokémon no Team Preview.
+   Outros formatos (como standard e singletype) usam o fluxo COUNTDOWN direto.
 
 4. **Thread safety**: Toda manipulação de party (snapshot, swap, restore)
    ocorre em callbacks do `ServerTaskTracker` (main thread). O `ConcurrentHashMap`
