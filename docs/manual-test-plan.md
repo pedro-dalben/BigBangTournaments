@@ -4,7 +4,7 @@
 
 - Servidor dedicado com BigBang Tournaments instalado
 - Dois jogadores de teste online (Player A e Player B)
-- Torneio `regulation_i_doubles` configurado
+- Torneio de duplas (`doubles` ou `regulation_i_doubles`) configurado
 - Cada jogador com party de 6 Pokémon válidos
 
 ## Roteiro
@@ -15,13 +15,14 @@
 |---|-------|-------------------|
 | 1 | Criar party de 6 Pokémon para cada jogador | — |
 | 2 | Registrar NBT original e checksum de cada party | — |
-| 3 | `/tournament duel <A> <B>` | Preview exibido para ambos |
-| 4 | Confirmar que espécies, itens e habilidades são exibidos | Informação correta |
-| 5 | A seleciona `/tournament select 1 2 3 5` | Confirmação para A |
-| 6 | B seleciona `/tournament select 2 3 4 6` | Batalha inicia em 5s |
-| 7 | Batalha começa 4v4 Doubles | Formato correto |
-| 8 | Encerrar por vitória | Parties restauradas |
-| 9 | Comparar NBT da party restaurada com snapshot original | Idêntico |
+| 3 | `/tournament duel <A> <B>` | Preview no chat e Menu Visual Interativo (baú 9x6) aberto para ambos |
+| 4 | Confirmar que espécies, itens e habilidades são exibidos no lore das lãs | Informação correta no menu e chat |
+| 5 | Tentar fechar o menu (ESC ou E) sem confirmar | Menu não fecha e é reaberto instantaneamente na tela |
+| 6 | A seleciona 4 Pokémon clicando nas lãs/itens no menu e clica em Confirmar (ou usa `/tournament select`) | Confirmação para A, botão vira Ouro |
+| 7 | B seleciona 4 Pokémon via menu e clica em Confirmar | Menus fecham, times escolhidos são anunciados, batalha inicia em 10s |
+| 8 | Batalha começa 4v4 Doubles | Formato correto |
+| 9 | Encerrar por vitória | Parties restauradas |
+| 10 | Comparar NBT da party restaurada com snapshot original | Idêntico |
 
 ### 2. Validações de Seleção
 

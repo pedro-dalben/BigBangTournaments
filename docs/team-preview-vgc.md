@@ -2,7 +2,7 @@
 
 ## Visão Geral
 
-O Team Preview VGC é um fluxo opcional para torneios do tipo `regulation_i_doubles`.
+O Team Preview é um fluxo para torneios de duplas (`doubles` e `regulation_i_doubles`).
 Antes da batalha, cada jogador vê os 6 Pokémon do oponente e seleciona exatamente 4
 para usar na batalha. O fluxo inteiro é gerenciado por uma `TournamentBattleSession`
 persistida em disco.
@@ -17,12 +17,20 @@ CREATED → TEAM_PREVIEW → PLAYER_ONE_SELECTED / PLAYER_TWO_SELECTED
 
 Estados terminais: `RESTORED`, `CANCELLED`, `FINISHED`.
 
-## Comandos
+## Interface e Comandos
+
+Quando a fase de Team Preview se inicia, além da mensagem no chat, o jogo abre automaticamente uma **Interface Gráfica (Menu de Baú 9x6)** para ambos os jogadores.
+- **Linha Superior (Slots 1 a 6):** Lãs coloridas representando os 6 Pokémon do oponente com informações detalhadas (espécie, nível, item e habilidade, conforme configuração).
+- **Linha Intermediária (Slots 19 a 24):** Seus 6 Pokémon da party.
+- **Linha Indicadora (Slots 28 a 33):** Lãs vermelhas (não selecionado) que mudam para verde ao clicar (selecionado).
+- **Centro Inferior (Slot 49):** Botão "CONFIRMAR" (Bloco de Esmeralda) que é habilitado assim que exatamente 4 Pokémon são escolhidos.
+- **Bloqueio de Fechamento:** Se o jogador tentar fechar o menu sem confirmar (ESC ou E), o menu é reaberto instantaneamente ("na cara da pessoa"). Após confirmar, o menu pode ser fechado livremente.
 
 | Comando | Descrição |
 |---------|-----------|
-| `/tournament duel <p1> <p2>` | Inicia batalha (VGC ou padrão conforme formato) |
-| `/tournament select <s1> <s2> <s3> <s4>` | Seleciona 4 slots (1-6) durante o preview |
+| `/tournament duel <p1> <p2>` | Inicia batalha (Doubles/VGC ou padrão conforme formato) |
+| `/tournament menu` (ou `preview`, `gui`) | Abre o menu visual interativo de seleção de Pokémon |
+| `/tournament select <s1> <s2> <s3> <s4>` | Seleciona 4 slots (1-6) via chat durante o preview |
 | `/tournament win <player>` | Registra vitória manual |
 
 ## Regras de Visibilidade

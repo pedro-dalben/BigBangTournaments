@@ -126,6 +126,12 @@ public final class TournamentCommandRegistrar {
                                                                 IntegerArgumentType.getInteger(context, "slot3"),
                                                                 IntegerArgumentType.getInteger(context, "slot4")
                                                         )))))))
+                .then(Commands.literal("menu")
+                        .executes(context -> executeOpenMenu(context.getSource())))
+                .then(Commands.literal("preview")
+                        .executes(context -> executeOpenMenu(context.getSource())))
+                .then(Commands.literal("gui")
+                        .executes(context -> executeOpenMenu(context.getSource())))
                 .then(Commands.literal("win")
                         .requires(source -> source.hasPermission(TournamentStateService.getAdminPermissionLevel(source.getServer())))
                         .then(Commands.argument("player", EntityArgument.player())
@@ -979,5 +985,10 @@ public final class TournamentCommandRegistrar {
     private static int executeSelectTeam(CommandSourceStack source, int slot1, int slot2, int slot3, int slot4) throws com.mojang.brigadier.exceptions.CommandSyntaxException {
         ServerPlayer player = source.getPlayerOrException();
         return com.bigbang_tournaments.service.TournamentBattleService.selectTeam(player, slot1, slot2, slot3, slot4);
+    }
+
+    private static int executeOpenMenu(CommandSourceStack source) throws com.mojang.brigadier.exceptions.CommandSyntaxException {
+        ServerPlayer player = source.getPlayerOrException();
+        return com.bigbang_tournaments.service.TournamentBattleService.openTeamPreviewMenu(player);
     }
 }

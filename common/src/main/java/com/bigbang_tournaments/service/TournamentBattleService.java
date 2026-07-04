@@ -156,9 +156,9 @@ public final class TournamentBattleService {
 
         TournamentState state = TournamentStateService.getState(server);
         String modeId = state != null ? TournamentModeRegistry.resolve(state.getTournamentType()).id() : "standard";
-        boolean isVgc = "regulation_i_doubles".equals(modeId);
+        boolean isDoubles = "doubles".equals(modeId) || "regulation_i_doubles".equals(modeId);
 
-        if (isVgc) {
+        if (isDoubles) {
             TournamentBattleSession session = new TournamentBattleSession(
                     player1.getUUID(), player1.getGameProfile().getName(),
                     player2.getUUID(), player2.getGameProfile().getName(),
@@ -179,10 +179,9 @@ public final class TournamentBattleService {
                 TournamentStateService.setActiveBattle(server, battleRecord);
                 TournamentMessages.broadcastNextBattle(server, player1.getGameProfile().getName(), player2.getGameProfile().getName());
 
-                sendTeamPreview(server, session, player1, player2, previewConfig);
-                scheduleTeamPreviewTimeout(server, session, previewConfig.getDurationSeconds());
+                startTeamPreviewPhase(server, session, player1, player2, previewConfig);
             } catch (Exception e) {
-                LOGGER.error("Failed to start VGC team preview", e);
+                LOGGER.error("Failed to start doubles team preview", e);
                 ACTIVE_SESSION_BY_PLAYER.remove(player1.getUUID());
                 ACTIVE_SESSION_BY_PLAYER.remove(player2.getUUID());
                 TournamentBattleSessionStorage.deleteSession(server, session.getSessionId());
@@ -703,6 +702,8 @@ public final class TournamentBattleService {
                                                TeamPreviewConfig previewConfig) {
         sendTeamPreview(server, session, player1, player2, previewConfig);
         sendTeamPreview(server, session, player2, player1, previewConfig);
+        com.bigbang_tournaments.menu.TeamPreviewMenu.open(player1, player2, session, previewConfig);
+        com.bigbang_tournaments.menu.TeamPreviewMenu.open(player2, player1, session, previewConfig);
         scheduleTeamPreviewTimeout(server, session, previewConfig.getDurationSeconds());
     }
 
@@ -712,7 +713,7 @@ public final class TournamentBattleService {
         List<Pokemon> team = PokemonTeamService.listPartyPokemon(owner);
 
         viewer.sendSystemMessage(net.minecraft.network.chat.Component.literal("§6§l========================================="));
-        viewer.sendSystemMessage(net.minecraft.network.chat.Component.literal("§e§lVGC TEAM PREVIEW - Time de " + owner.getGameProfile().getName() + ":"));
+        viewer.sendSystemMessage(net.minecraft.network.chat.Component.literal("§e§lTEAM PREVIEW - Time de " + owner.getGameProfile().getName() + ":"));
 
         int idx = 1;
         for (Pokemon p : team) {
@@ -756,6 +757,13 @@ public final class TournamentBattleService {
                 .withClickEvent(new net.minecraft.network.chat.ClickEvent(net.minecraft.network.chat.ClickEvent.Action.SUGGEST_COMMAND, "/tournament select 1 2 3 4"))
                 .withHoverEvent(new net.minecraft.network.chat.HoverEvent(net.minecraft.network.chat.HoverEvent.Action.SHOW_TEXT, net.minecraft.network.chat.Component.literal("Sugere o comando /tournament select 1 2 3 4"))));
         viewer.sendSystemMessage(helperMsg);
+
+        net.minecraft.network.chat.MutableComponent guiMsg = net.minecraft.network.chat.Component.literal("§a§l[CLIQUE AQUI PARA ABRIR O MENU VISUAL DE SELEÇÃO]");
+        guiMsg.setStyle(guiMsg.getStyle()
+                .withClickEvent(new net.minecraft.network.chat.ClickEvent(net.minecraft.network.chat.ClickEvent.Action.RUN_COMMAND, "/tournament menu"))
+                .withHoverEvent(new net.minecraft.network.chat.HoverEvent(net.minecraft.network.chat.HoverEvent.Action.SHOW_TEXT, net.minecraft.network.chat.Component.literal("Abre o menu visual de escolha de Pokemons"))));
+        viewer.sendSystemMessage(guiMsg);
+
         viewer.sendSystemMessage(net.minecraft.network.chat.Component.literal("§6§l========================================="));
     }
 
@@ -854,6 +862,38 @@ public final class TournamentBattleService {
             applySelectionsAndStartBattle(server, session);
         }
 
+        return 1;
+    }
+
+    public static int openTeamPreviewMenu(ServerPlayer player) {
+        MinecraftServer server = player.getServer();
+        if (server == null) {
+            return 0;
+        }
+
+        UUID playerUuid = player.getUUID();
+        UUID sessionId = ACTIVE_SESSION_BY_PLAYER.get(playerUuid);
+        if (sessionId == null) {
+            TournamentMessages.send(player, "Voce nao esta em uma fase de selecao de time ativa.");
+            return 0;
+        }
+
+        TournamentBattleSession session = TournamentBattleSessionStorage.loadSession(server, sessionId);
+        if (session == null || !session.getState().isPreviewActive()) {
+            TournamentMessages.send(player, "Nao ha uma fase de selecao de time ativa no momento.");
+            return 0;
+        }
+
+        boolean isPlayerOne = playerUuid.equals(session.getPlayerOneUuid());
+        UUID opponentUuid = isPlayerOne ? session.getPlayerTwoUuid() : session.getPlayerOneUuid();
+        ServerPlayer opponent = server.getPlayerList().getPlayer(opponentUuid);
+        if (opponent == null) {
+            TournamentMessages.send(player, "O seu oponente esta offline no momento.");
+            return 0;
+        }
+
+        TeamPreviewConfig config = TournamentStateService.getConfig(server).getTeamPreview();
+        com.bigbang_tournaments.menu.TeamPreviewMenu.open(player, opponent, session, config);
         return 1;
     }
 
@@ -974,9 +1014,25 @@ public final class TournamentBattleService {
                     TournamentStateService.setActiveBattle(server, activeBattle);
                 }
 
-                TournamentMessages.broadcastBattleCountdown(server, player1.getGameProfile().getName(), player2.getGameProfile().getName(), 5);
+                player1.closeContainer();
+                player2.closeContainer();
 
-                com.cobblemon.mod.common.api.scheduling.ServerTaskTracker.INSTANCE.after(5F, () -> {
+                List<String> p1Names = session.getPlayerOnePokemonIdentities() != null ? session.getPlayerOnePokemonIdentities().stream()
+                        .map(id -> id.contains("|") ? id.substring(id.indexOf('|') + 1) : id)
+                        .toList() : List.of();
+                List<String> p2Names = session.getPlayerTwoPokemonIdentities() != null ? session.getPlayerTwoPokemonIdentities().stream()
+                        .map(id -> id.contains("|") ? id.substring(id.indexOf('|') + 1) : id)
+                        .toList() : List.of();
+
+                TournamentMessages.broadcast(server, "§6§l=========================================");
+                TournamentMessages.broadcast(server, "§e§lSELEÇÃO DE DUPLAS CONFIRMADA!");
+                TournamentMessages.broadcast(server, "§a" + player1.getGameProfile().getName() + " §fescolheu: §b" + String.join(", ", p1Names));
+                TournamentMessages.broadcast(server, "§a" + player2.getGameProfile().getName() + " §fescolheu: §b" + String.join(", ", p2Names));
+                TournamentMessages.broadcast(server, "§6§l=========================================");
+
+                TournamentMessages.broadcastBattleCountdown(server, player1.getGameProfile().getName(), player2.getGameProfile().getName(), 10);
+
+                com.cobblemon.mod.common.api.scheduling.ServerTaskTracker.INSTANCE.after(10F, () -> {
                     beginCobblemonBattle(server, player1, player2);
                     return Unit.INSTANCE;
                 });
