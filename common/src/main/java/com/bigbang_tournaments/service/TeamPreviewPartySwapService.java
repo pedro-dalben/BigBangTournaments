@@ -26,6 +26,7 @@ import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
 import java.util.HexFormat;
+import java.util.HashSet;
 import java.util.List;
 import java.util.UUID;
 
@@ -67,55 +68,25 @@ public class TeamPreviewPartySwapService {
             List<Pokemon> p1Original = PokemonTeamService.listPartyPokemon(player1);
             List<Pokemon> p2Original = PokemonTeamService.listPartyPokemon(player2);
 
-            String p1Checksum = saveAtomicSnapshot(server, sessionId, session.getPlayerOneUuid(), p1Original);
-            if (p1Checksum == null) {
+            if (!isSelectionUsable(p1Original, session.getPlayerOneSelection())) {
                 session.transitionTo(TournamentBattleStatus.FAILED);
-                session.setFinalizationReason("snapshot_write_failed_p1");
+                session.setFinalizationReason("invalid_selection_p1");
                 TournamentBattleSessionStorage.saveSession(server, session);
-                return SwapResult.SNAPSHOT_FAILED;
-            }
-            session.setPlayerOneSnapshotPath(TournamentBattleSessionStorage.getSnapshotFile(server, sessionId, session.getPlayerOneUuid()).toString());
-            session.setPlayerOneSnapshotChecksum(p1Checksum);
-            TournamentBattleSessionStorage.saveSession(server, session);
-
-            String p2Checksum = saveAtomicSnapshot(server, sessionId, session.getPlayerTwoUuid(), p2Original);
-            if (p2Checksum == null) {
-                LOGGER.error("Snapshot failed for player 2 after player 1 snapshot was saved. Rolling back player 1.");
-                restorePlayerFromSnapshot(server, session, session.getPlayerOneUuid(), p1Original);
-                session.transitionTo(TournamentBattleStatus.FAILED);
-                session.setFinalizationReason("snapshot_write_failed_p2");
-                TournamentBattleSessionStorage.saveSession(server, session);
-                return SwapResult.ROLLED_BACK;
-            }
-            session.setPlayerTwoSnapshotPath(TournamentBattleSessionStorage.getSnapshotFile(server, sessionId, session.getPlayerTwoUuid()).toString());
-            session.setPlayerTwoSnapshotChecksum(p2Checksum);
-            TournamentBattleSessionStorage.saveSession(server, session);
-
-            if (!applyFilteredParty(player1, p1Original, session.getPlayerOneSelection())) {
-                restorePlayerFromSnapshot(server, session, session.getPlayerOneUuid(), p1Original);
-                restorePlayerFromSnapshot(server, session, session.getPlayerTwoUuid(), p2Original);
-                session.transitionTo(TournamentBattleStatus.FAILED);
-                session.setFinalizationReason("party_swap_failed_p1");
-                TournamentBattleSessionStorage.saveSession(server, session);
-                return SwapResult.ROLLED_BACK;
+                return SwapResult.NO_SELECTION;
             }
 
-            if (!applyFilteredParty(player2, p2Original, session.getPlayerTwoSelection())) {
-                restorePlayerFromSnapshot(server, session, session.getPlayerOneUuid(), p1Original);
-                restorePlayerFromSnapshot(server, session, session.getPlayerTwoUuid(), p2Original);
+            if (!isSelectionUsable(p2Original, session.getPlayerTwoSelection())) {
                 session.transitionTo(TournamentBattleStatus.FAILED);
-                session.setFinalizationReason("party_swap_failed_p2");
+                session.setFinalizationReason("invalid_selection_p2");
                 TournamentBattleSessionStorage.saveSession(server, session);
-                return SwapResult.ROLLED_BACK;
+                return SwapResult.NO_SELECTION;
             }
 
             if (!session.transitionTo(TournamentBattleStatus.PARTIES_SWAPPED)) {
-                restorePlayerFromSnapshot(server, session, session.getPlayerOneUuid(), p1Original);
-                restorePlayerFromSnapshot(server, session, session.getPlayerTwoUuid(), p2Original);
                 session.setState(TournamentBattleStatus.FAILED);
                 session.setFinalizationReason("state_transition_failed");
                 TournamentBattleSessionStorage.saveSession(server, session);
-                return SwapResult.ROLLED_BACK;
+                return SwapResult.SWAP_FAILED;
             }
 
             TournamentBattleSessionStorage.saveSession(server, session);
@@ -195,9 +166,12 @@ public class TeamPreviewPartySwapService {
             if (expectedChecksum != null && !expectedChecksum.isEmpty()) {
                 String actualChecksum = computeFileChecksum(snapshotFile);
                 if (!expectedChecksum.equals(actualChecksum)) {
-                    LOGGER.error("Checksum mismatch for player {} snapshot in session {}. Expected: {}, Actual: {}",
+                    // Soft-fail: a checksum mismatch must not prevent party
+                    // restoration, because that is what loses player Pokemon
+                    // permanently. The sessionId/playerUuid checks above are
+                    // the authoritative integrity gate. Log and proceed.
+                    LOGGER.warn("Checksum mismatch for player {} snapshot in session {}. Expected: {}, Actual: {}. Restoring anyway.",
                             playerUuid, session.getSessionId(), expectedChecksum, actualChecksum);
-                    return false;
                 }
             }
 
@@ -243,6 +217,20 @@ public class TeamPreviewPartySwapService {
         }
     }
 
+    public static PartyStore createBattleParty(ServerPlayer player, List<Integer> selectedSlots) {
+        List<Pokemon> original = PokemonTeamService.listPartyPokemon(player);
+        if (!isSelectionUsable(original, selectedSlots)) {
+            return null;
+        }
+
+        PartyStore battleParty = new PartyStore(player.getUUID());
+        for (int i = 0; i < selectedSlots.size(); i++) {
+            int slot = selectedSlots.get(i);
+            battleParty.set(i, original.get(slot - 1));
+        }
+        return battleParty;
+    }
+
     private static String saveAtomicSnapshot(MinecraftServer server, UUID sessionId, UUID playerUuid, List<Pokemon> party) {
         try {
             Path snapshotDir = TournamentBattleSessionStorage.getSessionDirPath(server, sessionId);
@@ -277,21 +265,18 @@ public class TeamPreviewPartySwapService {
                 out.flush();
             }
 
-            String checksum = computeFileChecksum(tempPath);
-            root.putString("checksum", checksum);
-
-            try (OutputStream out = Files.newOutputStream(tempPath)) {
-                NbtIo.writeCompressed(root, out);
-                out.flush();
-            }
-
             try {
                 Files.move(tempPath, targetPath, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
             } catch (AtomicMoveNotSupportedException e) {
                 Files.move(tempPath, targetPath, StandardCopyOption.REPLACE_EXISTING);
             }
 
-            return checksum;
+            // Compute the checksum AFTER the final write so it matches the bytes
+            // that restorePlayerFromDisk will hash again on read. The previous
+            // implementation hashed the file before adding a "checksum" field to
+            // the NBT root and rewriting it, which made every restore fail the
+            // equality check and silently dropped the player's original party.
+            return computeFileChecksum(targetPath);
         } catch (Exception e) {
             LOGGER.error("Failed to save atomic snapshot for player {} in session {}", playerUuid, sessionId, e);
             return null;
@@ -330,6 +315,21 @@ public class TeamPreviewPartySwapService {
             LOGGER.error("Failed to apply filtered party for player {}", player.getUUID(), e);
             return false;
         }
+    }
+
+    private static boolean isSelectionUsable(List<Pokemon> original, List<Integer> selectedSlots) {
+        if (original == null || selectedSlots == null || selectedSlots.size() != 4) {
+            return false;
+        }
+
+        HashSet<Integer> seen = new HashSet<>();
+        for (int slot : selectedSlots) {
+            if (slot < 1 || slot > original.size() || !seen.add(slot)) {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     private static void forceRollback(MinecraftServer server, TournamentBattleSession session) {

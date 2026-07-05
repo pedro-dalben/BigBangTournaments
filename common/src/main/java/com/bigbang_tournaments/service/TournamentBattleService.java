@@ -390,16 +390,29 @@ public final class TournamentBattleService {
             for (var p : battle.getPlayers()) if (p != null && p.getUUID() != null) allUuids.add(p.getUUID());
         }
 
-        UUID sessionId = findSessionForPlayers(server, allUuids);
+        TournamentBattleRecord activeBattle = TournamentStateService.getActiveBattle(server);
+        UUID sessionId = findSessionForBattle(server, battle, allUuids, activeBattle);
         if (sessionId != null) {
             TournamentBattleFinalizationService.safeFinalize(server, sessionId, "battle_victory");
             for (UUID uuid : allUuids) {
                 ACTIVE_SESSION_BY_PLAYER.remove(uuid);
             }
+            if (activeBattle != null) {
+                ACTIVE_SESSION_BY_PLAYER.remove(activeBattle.getPlayer1Uuid());
+                ACTIVE_SESSION_BY_PLAYER.remove(activeBattle.getPlayer2Uuid());
+            }
+        } else {
+            // In-memory map already cleared (e.g. prior finalize). Still scan disk
+            // for non-terminal sessions and restore so players do not lose the
+            // unselected Pokemon from their party.
+            restoreFallbackForBattle(server, battle, allUuids, activeBattle);
         }
 
-        TournamentBattleRecord activeBattle = TournamentStateService.getActiveBattle(server);
-        if (activeBattle == null || !containsPlayers(activeBattle, battle.getPlayerUUIDs())) {
+        boolean sameBattle = activeBattle != null
+                && activeBattle.getBattleId() != null
+                && battle.getBattleId() != null
+                && activeBattle.getBattleId().equals(battle.getBattleId().toString());
+        if (activeBattle == null || (!sameBattle && !containsPlayers(activeBattle, allUuids))) {
             return;
         }
 
@@ -454,6 +467,10 @@ public final class TournamentBattleService {
             if (opponentUuid != null) {
                 ACTIVE_SESSION_BY_PLAYER.remove(opponentUuid);
             }
+        } else {
+            // Map was cleared (prior finalize ran). Make sure non-terminal sessions
+            // on disk still get restored so the opponent does not lose Pokemon.
+            restoreFallbackForPlayers(server, List.of(player.getUUID()));
         }
         markManualResultRequired(server, player.getUUID(), "fuga");
     }
@@ -473,6 +490,10 @@ public final class TournamentBattleService {
         if (sessionId != null) {
             TournamentBattleFinalizationService.safeFinalize(server, sessionId, "player_disconnected", player);
             ACTIVE_SESSION_BY_PLAYER.remove(player.getUUID());
+        } else {
+            // Fallback: if in-memory map was cleared but a non-terminal session with
+            // this player still exists on disk, finalize and restore it now.
+            restoreFallbackForPlayers(server, List.of(player.getUUID()));
         }
 
         TournamentBattleRecord activeBattle = TournamentStateService.getActiveBattle(server);
@@ -584,15 +605,54 @@ public final class TournamentBattleService {
 
         TournamentState state = TournamentStateService.getState(server);
         com.cobblemon.mod.common.battles.BattleFormat format = com.cobblemon.mod.common.battles.BattleFormat.Companion.getGEN_9_SINGLES();
+        boolean isDoubles = false;
         if (state != null) {
             String modeId = TournamentModeRegistry.resolve(state.getTournamentType()).id();
             if ("doubles".equals(modeId) || "regulation_i_doubles".equals(modeId)) {
                 format = com.cobblemon.mod.common.battles.BattleFormat.Companion.getGEN_9_DOUBLES();
+                isDoubles = true;
             }
         }
 
         currentServer = server;
-        BattleStartResult result = BattleBuilder.INSTANCE.pvp1v1(player1, player2, null, null, format, false, false);
+        BattleStartResult result;
+        if (isDoubles) {
+            UUID sessId = ACTIVE_SESSION_BY_PLAYER.get(player1.getUUID());
+            TournamentBattleSession session = sessId != null ? TournamentBattleSessionStorage.loadSession(server, sessId) : null;
+            PartyStore playerOneBattleParty = session != null
+                    ? TeamPreviewPartySwapService.createBattleParty(player1, session.getPlayerOneSelection())
+                    : null;
+            PartyStore playerTwoBattleParty = session != null
+                    ? TeamPreviewPartySwapService.createBattleParty(player2, session.getPlayerTwoSelection())
+                    : null;
+
+            if (session == null || playerOneBattleParty == null || playerTwoBattleParty == null) {
+                LOGGER.error("Could not build temporary battle party for doubles battle between {} and {}",
+                        player1.getGameProfile().getName(), player2.getGameProfile().getName());
+                UUID sessionId = ACTIVE_SESSION_BY_PLAYER.get(player1.getUUID());
+                if (sessionId != null) {
+                    TournamentBattleFinalizationService.safeFinalize(server, sessionId, "battle_party_build_failed");
+                    ACTIVE_SESSION_BY_PLAYER.remove(player1.getUUID());
+                    ACTIVE_SESSION_BY_PLAYER.remove(player2.getUUID());
+                }
+                releaseAreaLocks(server, activeBattle);
+                TournamentStateService.archiveActiveBattle(server);
+                return;
+            }
+
+            result = BattleBuilder.INSTANCE.pvp1v1(
+                    player1,
+                    player2,
+                    null,
+                    null,
+                    format,
+                    true,
+                    false,
+                    player -> player.getUUID().equals(player1.getUUID()) ? playerOneBattleParty : playerTwoBattleParty
+            );
+        } else {
+            result = BattleBuilder.INSTANCE.pvp1v1(player1, player2, null, null, format, false, false);
+        }
         if (result instanceof SuccessfulBattleStart successfulBattleStart) {
             PokemonBattle battle = successfulBattleStart.getBattle();
             activeBattle.setBattleId(battle.getBattleId().toString());
@@ -743,12 +803,123 @@ public final class TournamentBattleService {
         return null;
     }
 
+    private static UUID findSessionForBattle(MinecraftServer server, PokemonBattle battle, Iterable<UUID> playerUuids,
+                                             TournamentBattleRecord activeBattle) {
+        UUID sessionId = findSessionForPlayers(server, playerUuids);
+        if (sessionId != null) {
+            return sessionId;
+        }
+
+        if (activeBattle != null) {
+            sessionId = ACTIVE_SESSION_BY_PLAYER.get(activeBattle.getPlayer1Uuid());
+            if (sessionId == null) {
+                sessionId = ACTIVE_SESSION_BY_PLAYER.get(activeBattle.getPlayer2Uuid());
+            }
+            if (sessionId != null) {
+                TournamentBattleSession session = TournamentBattleSessionStorage.loadSession(server, sessionId);
+                if (session != null) {
+                    return sessionId;
+                }
+            }
+        }
+
+        String battleId = battle != null && battle.getBattleId() != null ? battle.getBattleId().toString() : null;
+        if (battleId == null || battleId.isBlank()) {
+            return null;
+        }
+
+        for (TournamentBattleSession session : TournamentBattleSessionStorage.listActiveSessions(server)) {
+            if (session == null || session.getState().isTerminal()) {
+                continue;
+            }
+            if (battleId.equals(session.getBattleId()) || battleId.equals(session.getCobblemonBattleReference())) {
+                return session.getSessionId();
+            }
+        }
+
+        return null;
+    }
+
     private static UUID findOpponentInSession(MinecraftServer server, UUID sessionId, UUID playerUuid) {
         TournamentBattleSession session = TournamentBattleSessionStorage.loadSession(server, sessionId);
         if (session == null) return null;
         if (playerUuid.equals(session.getPlayerOneUuid())) return session.getPlayerTwoUuid();
         if (playerUuid.equals(session.getPlayerTwoUuid())) return session.getPlayerOneUuid();
         return null;
+    }
+
+    /**
+     * Defensive fallback: scan every non-terminal session on disk and finalize
+     * any whose players overlap the supplied uuids. Restores original parties from
+     * disk snapshots even when the in-memory ACTIVE_SESSION_BY_PLAYER map was
+     * already cleared (e.g. a prior finalize ran, but restoration silently
+     * failed and left party reduced to 4 Pokemon).
+     *
+     * This is the safety net that prevents permanently losing the unselected
+     * Pokemon after a doubles Regulation I battle.
+     */
+    private static void restoreFallbackForPlayers(MinecraftServer server, Iterable<UUID> playerUuids) {
+        if (server == null || playerUuids == null) return;
+        java.util.Set<UUID> targets = new HashSet<>();
+        for (UUID u : playerUuids) if (u != null) targets.add(u);
+        if (targets.isEmpty()) return;
+
+        for (TournamentBattleSession session : TournamentBattleSessionStorage.listActiveSessions(server)) {
+            if (session == null || session.getState().isTerminal()) continue;
+            UUID p1 = session.getPlayerOneUuid();
+            UUID p2 = session.getPlayerTwoUuid();
+            if (!targets.contains(p1) && !targets.contains(p2)) continue;
+
+            UUID sid = session.getSessionId();
+            LOGGER.warn("Fallback restore: finalizing non-terminal session {} (state={}) for players p1={} p2={}",
+                    sid, session.getState(), p1, p2);
+            TournamentBattleFinalizationService.safeFinalize(server, sid, "fallback_restore");
+            if (p1 != null) ACTIVE_SESSION_BY_PLAYER.remove(p1);
+            if (p2 != null) ACTIVE_SESSION_BY_PLAYER.remove(p2);
+        }
+    }
+
+    private static void restoreFallbackForBattle(MinecraftServer server, PokemonBattle battle, Iterable<UUID> playerUuids,
+                                                 TournamentBattleRecord activeBattle) {
+        Set<UUID> targets = new HashSet<>();
+        if (playerUuids != null) {
+            for (UUID uuid : playerUuids) {
+                if (uuid != null) {
+                    targets.add(uuid);
+                }
+            }
+        }
+        if (activeBattle != null) {
+            if (activeBattle.getPlayer1Uuid() != null) {
+                targets.add(activeBattle.getPlayer1Uuid());
+            }
+            if (activeBattle.getPlayer2Uuid() != null) {
+                targets.add(activeBattle.getPlayer2Uuid());
+            }
+        }
+
+        if (!targets.isEmpty()) {
+            restoreFallbackForPlayers(server, targets);
+            return;
+        }
+
+        String battleId = battle != null && battle.getBattleId() != null ? battle.getBattleId().toString() : null;
+        if (battleId == null || battleId.isBlank()) {
+            return;
+        }
+
+        for (TournamentBattleSession session : TournamentBattleSessionStorage.listActiveSessions(server)) {
+            if (session == null || session.getState().isTerminal()) {
+                continue;
+            }
+            if (battleId.equals(session.getBattleId()) || battleId.equals(session.getCobblemonBattleReference())) {
+                UUID sid = session.getSessionId();
+                LOGGER.warn("Fallback restore by battleId: finalizing non-terminal session {} for battle {}", sid, battleId);
+                TournamentBattleFinalizationService.safeFinalize(server, sid, "fallback_restore_battle_id");
+                if (session.getPlayerOneUuid() != null) ACTIVE_SESSION_BY_PLAYER.remove(session.getPlayerOneUuid());
+                if (session.getPlayerTwoUuid() != null) ACTIVE_SESSION_BY_PLAYER.remove(session.getPlayerTwoUuid());
+            }
+        }
     }
 
     private static void startTeamPreviewPhase(MinecraftServer server, TournamentBattleSession session,

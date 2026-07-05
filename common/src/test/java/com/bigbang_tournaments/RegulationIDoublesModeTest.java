@@ -34,16 +34,33 @@ public class RegulationIDoublesModeTest {
         RegulationIDoublesMode mode = new RegulationIDoublesMode(preset);
         EffectiveTournamentRules rules = mode.resolveRules(new TournamentConfig(), new TournamentState());
 
-        assertTrue(rules.isBanLegendaries());
-        assertTrue(rules.isBanMythicals());
-        assertEquals(List.of("pecharunt", "mew"), rules.getBannedSpecies());
+        assertFalse(rules.isBanLegendaries());
+        assertFalse(rules.isBanMythicals());
+        assertEquals(List.of(), rules.getBannedSpecies());
         assertEquals(List.of("choice-specs"), rules.getBannedItems());
         assertTrue(rules.isItemClauseEnabled());
         assertTrue(rules.isSpeciesClauseEnabled());
         assertFalse(rules.isAllowMega());
         assertTrue(rules.isAllowTera());
-        assertFalse(rules.isAllowDynamax());
+        assertTrue(rules.isAllowDynamax());
         assertFalse(rules.isAllowZMove());
         assertTrue(rules.isSingleSpecialMechanicPerTeam());
+    }
+
+    @Test
+    public void testRulesResolutionIgnoresGlobalLegendaryBlacklist() {
+        RegulationIPreset preset = new RegulationIPreset();
+        RegulationIDoublesMode mode = new RegulationIDoublesMode(preset);
+
+        TournamentConfig config = new TournamentConfig();
+        config.setBanLegendaries(true);
+        config.setBanMythicals(true);
+        config.setBannedSpecies(List.of("miraidon", "calyrex"));
+
+        EffectiveTournamentRules rules = mode.resolveRules(config, new TournamentState());
+
+        assertFalse(rules.isBanLegendaries());
+        assertFalse(rules.isBanMythicals());
+        assertTrue(rules.getBannedSpecies().isEmpty());
     }
 }

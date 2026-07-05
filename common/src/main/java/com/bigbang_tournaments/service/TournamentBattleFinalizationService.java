@@ -122,8 +122,15 @@ public class TournamentBattleFinalizationService {
                 if (!p1Restored && !p2Restored && session.getPlayerOneSnapshotPath() == null && session.getPlayerTwoSnapshotPath() == null) {
                     session.setState(TournamentBattleStatus.CANCELLED);
                 } else if (p1Restored && p2Restored) {
-                    session.transitionTo(TournamentBattleStatus.RESTORED);
-                    session.setRestoredAt(System.currentTimeMillis());
+                    if (session.getState() == TournamentBattleStatus.RESTORE_PENDING) {
+                        session.transitionTo(TournamentBattleStatus.RESTORING);
+                    }
+                    if (!session.transitionTo(TournamentBattleStatus.RESTORED)) {
+                        LOGGER.error("Could not transition session {} to RESTORED from state {}", sessionId, session.getState());
+                        session.setState(TournamentBattleStatus.FAILED);
+                    } else {
+                        session.setRestoredAt(System.currentTimeMillis());
+                    }
                 } else if (session.getState() == TournamentBattleStatus.RESTORE_PENDING) {
                     session.setState(TournamentBattleStatus.RESTORING);
                     if (!p1Restored && session.getPlayerOneSnapshotPath() != null) {

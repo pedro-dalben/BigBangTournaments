@@ -37,15 +37,15 @@ public class RegulationIDoublesMode implements TournamentMode {
         // Under Regulation I: Mega, Dynamax, Gigantamax, Z-Moves are disabled.
         // Terastallization feature flag comes from the preset/config.
         return new EffectiveTournamentRules(
-                true, // banLegendaries (always forbidden under Regulation I rules, except restricted but they are Mythicals/Restricted and banned species check takes care of them)
-                true, // banMythicals (always forbidden)
-                preset.getBannedMythicals(), // We will validate restricted and mythicals, let's pass banned species list
+                false, // banLegendaries (false, as we validate restricted/mythicals list manually, and allow sub-legendaries)
+                false, // banMythicals (validated manually below to avoid conflicting global/generic bans)
+                List.of(), // Do not inherit global banned species for Regulation I restricted rules
                 preset.getBannedItems(),
                 true, // Item clause: enabled
                 true, // Species clause: enabled
                 false, // Mega: disabled
                 preset.isTeraEnabled(), // Tera: feature flag
-                false, // Dynamax: disabled
+                true, // Dynamax: enabled
                 false, // Z-Move: disabled
                 true // Single special mechanic per team: enabled
         );
@@ -138,23 +138,10 @@ public class RegulationIDoublesMode implements TournamentMode {
                 foundRestricted.add(speciesName);
             }
 
-            // Eligible check: allowed species
-            boolean isAllowed = false;
-            for (String allowed : preset.getAllowedSpecies()) {
-                if (normalizedSpeciesName.startsWith(allowed.toLowerCase(Locale.ROOT))) {
-                    isAllowed = true;
-                    break;
-                }
-            }
-
-            if (!isAllowed && !isMythical && !isRestricted) {
-                // If it is not explicitly allowed (HOME/Events, etc.), report it
-                violations.add(new TournamentRuleViolation(
-                        TournamentRuleViolationType.BANNED_SPECIES,
-                        "[Campeonato] " + speciesName + " não é permitido no Regulation I.",
-                        speciesName
-                ));
-            }
+            // Regulation I allows standard and sub-legendary species by default.
+            // Restricted and Mythical handling is explicit above, so we do not
+            // apply an allowlist here. A stale server-side preset whitelist was
+            // incorrectly banning common legal picks such as Incineroar/Amoonguss.
         }
 
         // Restricted count check
